@@ -1,0 +1,33 @@
+node_modules/
+**/node_modules/
+dist/
+build/
+.expo/
+.expo-shared/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environments
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+
+# Mineflayer / prismarine-auth token caches (NEVER commit)
+bridge/tokens/
+bridge/.minecraft-cache/
+**/nmp-cache/
+
+# Expo build outputs
+*.ipa
+*.apk
+*.aab
+
+# TS build info
+*.tsbuildinfo

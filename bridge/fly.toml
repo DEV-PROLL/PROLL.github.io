@@ -1,0 +1,40 @@
+# Fly.io config for the PROLL Minecraft chat bridge.
+# Adjust app name and region for your account.
+
+app = "proll-mc-bridge"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+  # The Dockerfile expects to be built from the monorepo root.
+  # Run: `flyctl deploy --dockerfile bridge/Dockerfile` from repo root.
+
+[env]
+  WS_PORT = "8080"
+  TOKENS_DIR = "/data/tokens"
+  MC_VERSION = "1.21.4"
+  MAX_SESSIONS = "20"
+  CHAT_RATE_LIMIT = "2"
+
+[[mounts]]
+  source = "bridge_tokens"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

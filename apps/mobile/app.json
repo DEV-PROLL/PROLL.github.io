@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "PROLL",
+    "slug": "proll-mc-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0d1117"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.proll.mcmobile"
+    },
+    "android": {
+      "package": "com.proll.mcmobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0d1117"
+      }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

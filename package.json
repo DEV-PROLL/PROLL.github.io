@@ -1,0 +1,18 @@
+{
+  "name": "proll-mc-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mobile chat client for a Minecraft Java Edition server: each app user logs in with their own Microsoft account and joins the server as their own player via a headless mineflayer session.",
+  "workspaces": [
+    "bridge",
+    "apps/mobile"
+  ],
+  "scripts": {
+    "bridge:dev": "npm run dev -w bridge",
+    "bridge:build": "npm run build -w bridge",
+    "mobile:start": "npm run start -w mobile"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
