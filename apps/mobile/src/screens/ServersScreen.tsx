@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -14,6 +15,15 @@ interface Props {
   onContinue: (bridgeUrl: string) => void;
 }
 
+// In dev builds, pre-fill a sensible default so testing against a local
+// bridge doesn't require typing the URL every time. Android emulator can't
+// reach the host's "localhost" — it has to go through 10.0.2.2.
+const DEV_DEFAULT_BRIDGE_URL = __DEV__
+  ? Platform.OS === "android"
+    ? "ws://10.0.2.2:8080"
+    : "ws://localhost:8080"
+  : "";
+
 // Initial screen — collect the bridge URL. In a future version we'd
 // support multiple servers (the screenshot's list UI), but MVP tracks one.
 export function ServersScreen({ onContinue }: Props) {
@@ -23,6 +33,7 @@ export function ServersScreen({ onContinue }: Props) {
   useEffect(() => {
     void getBridgeUrl().then((stored) => {
       if (stored) setUrl(stored);
+      else if (DEV_DEFAULT_BRIDGE_URL) setUrl(DEV_DEFAULT_BRIDGE_URL);
       setLoading(false);
     });
   }, []);
@@ -49,7 +60,7 @@ export function ServersScreen({ onContinue }: Props) {
         <TextInput
           value={url}
           onChangeText={setUrl}
-          placeholder="wss://your-bridge.fly.dev"
+          placeholder={DEV_DEFAULT_BRIDGE_URL || "wss://your-bridge.fly.dev"}
           placeholderTextColor={theme.textDim}
           autoCapitalize="none"
           autoCorrect={false}
