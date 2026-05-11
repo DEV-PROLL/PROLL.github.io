@@ -267,7 +267,7 @@ async function fetchServerStatus(bridgeUrl: string): Promise<ServerStatus> {
   try {
     const url = toStatusUrl(bridgeUrl);
     const response = await fetch(url, {
-      headers: { "Cache-Control": "no-cache" },
+      cache: "no-store",
     });
     if (!response.ok) {
       throw new Error(`status ${response.status}`);

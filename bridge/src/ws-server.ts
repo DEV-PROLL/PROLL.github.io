@@ -127,7 +127,7 @@ async function handleHttpRequest(
   const headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Headers": "Authorization, Cache-Control, Content-Type",
   };
 
   if (req.method === "OPTIONS") {
