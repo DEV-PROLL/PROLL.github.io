@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - claude/minecraft-mobile-app-57Pds
   workflow_dispatch:
 
 permissions:
