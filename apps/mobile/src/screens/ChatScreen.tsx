@@ -363,129 +363,133 @@ export function ChatScreen({
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? 40 : 0}
     >
-      <View style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={onLogout}>
-          <Text style={styles.backText}>‹</Text>
-        </Pressable>
-        <MinecraftHead uuid={uuid} size={46} style={styles.headerHead} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.headerIgn}>{ign}</Text>
-          <Text style={styles.headerSub}>
-            {serverAddress} · MC {mcVersion}
-            {serverInfo.online != null ? `  ·  ${serverInfo.online} online` : ""}
-          </Text>
-        </View>
-        <ConnectionPill
-          state={state}
-          connected={serverInfo.connected}
-          phase={serverInfo.phase}
-        />
-        <Pressable style={styles.logoutBtn} onPress={confirmLogout}>
-          <Text style={styles.logoutText}>•••</Text>
-        </Pressable>
-      </View>
-
-      {state === "open" && !serverInfo.connected && serverInfo.phase !== "joining" && (
-        <View style={styles.reconnectBanner}>
-          <Text style={styles.reconnectBannerText}>
-            {serverInfo.phase === "kicked" ? "서버에서 연결이 끊겼습니다." : "서버 연결이 끊겼습니다."}
-          </Text>
-          <Pressable style={styles.reconnectBtn} onPress={reconnect}>
-            <Text style={styles.reconnectText}>재접속</Text>
+      <View style={styles.chatShell}>
+        <View style={styles.header}>
+          <Pressable style={styles.backBtn} onPress={handleLogoutInternal}>
+            <Text style={styles.backText}>‹</Text>
           </Pressable>
+          <MinecraftHead uuid={uuid} size={46} style={styles.headerHead} />
+          <View style={styles.headerCopy}>
+            <Text style={styles.headerIgn} numberOfLines={1}>{ign}</Text>
+            <Text style={styles.headerSub} numberOfLines={1}>
+              {serverAddress} · MC {mcVersion}
+              {serverInfo.online != null ? `  ·  ${serverInfo.online} online` : ""}
+            </Text>
+          </View>
+          <View style={styles.headerActions}>
+            <ConnectionPill
+              state={state}
+              connected={serverInfo.connected}
+              phase={serverInfo.phase}
+            />
+            <Pressable style={styles.logoutBtn} onPress={confirmLogout}>
+              <Text style={styles.logoutText}>•••</Text>
+            </Pressable>
+          </View>
         </View>
-      )}
 
-      <FlatList
-        ref={listRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <Row
-            message={item}
-            myIgn={ign}
-            onSegmentClick={handleSegmentClick}
-            onSegmentHover={handleSegmentHover}
-          />
+        {state === "open" && !serverInfo.connected && serverInfo.phase !== "joining" && (
+          <View style={styles.reconnectBanner}>
+            <Text style={styles.reconnectBannerText}>
+              {serverInfo.phase === "kicked" ? "서버에서 연결이 끊겼습니다." : "서버 연결이 끊겼습니다."}
+            </Text>
+            <Pressable style={styles.reconnectBtn} onPress={reconnect}>
+              <Text style={styles.reconnectText}>재접속</Text>
+            </Pressable>
+          </View>
         )}
-        contentContainerStyle={styles.list}
-        keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => scrollToBottom(true)}
-        onLayout={() => scrollToBottom(false)}
-      />
 
-      {completionMatches.length > 0 && (
-        <View style={styles.completionBar}>
-          <FlatList
-            horizontal
-            data={completionMatches}
-            keyExtractor={(item) => item.value}
-            keyboardShouldPersistTaps="handled"
-            showsHorizontalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <Pressable
-                style={styles.completionChip}
-                onPress={() => handleCompletionPress(item)}
-                onLongPress={() => {
-                  if (item.tooltip) Alert.alert(item.value, item.tooltip);
-                }}
-              >
-                <Text style={styles.completionText} numberOfLines={1}>
-                  {item.value}
-                </Text>
-              </Pressable>
-            )}
-          />
-        </View>
-      )}
-
-      <View style={styles.composer}>
-        <View style={styles.historyControls}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.historyBtn,
-              pressed ? styles.historyBtnPressed : null,
-              inputHistory.length === 0 ? styles.historyBtnDisabled : null,
-            ]}
-            disabled={inputHistory.length === 0}
-            onPress={showPreviousInput}
-          >
-            <Text style={styles.historyText}>↑</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [
-              styles.historyBtn,
-              pressed ? styles.historyBtnPressed : null,
-              historyCursor == null ? styles.historyBtnDisabled : null,
-            ]}
-            disabled={historyCursor == null}
-            onPress={showNextInput}
-          >
-            <Text style={styles.historyText}>↓</Text>
-          </Pressable>
-        </View>
-        <TextInput
-          style={styles.input}
-          value={input}
-          onChangeText={handleInputChange}
-          placeholder={serverInfo.connected ? "Message or /command" : "Reconnect to send"}
-          placeholderTextColor={theme.textDim}
-          autoCorrect={false}
-          autoCapitalize="none"
-          returnKeyType="send"
-          onSubmitEditing={handleSend}
-          editable={serverInfo.connected}
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <Row
+              message={item}
+              myIgn={ign}
+              onSegmentClick={handleSegmentClick}
+              onSegmentHover={handleSegmentHover}
+            />
+          )}
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => scrollToBottom(true)}
+          onLayout={() => scrollToBottom(false)}
         />
-        <Pressable
-          style={({ pressed }) => [
-            styles.sendBtn,
-            pressed && serverInfo.connected ? styles.sendBtnPressed : null,
-            !serverInfo.connected && styles.sendBtnDisabled,
-          ]}
-          onPress={handleSend}
-        >
-          <Text style={styles.sendText}>전송</Text>
-        </Pressable>
+
+        {completionMatches.length > 0 && (
+          <View style={styles.completionBar}>
+            <FlatList
+              horizontal
+              data={completionMatches}
+              keyExtractor={(item) => item.value}
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={styles.completionChip}
+                  onPress={() => handleCompletionPress(item)}
+                  onLongPress={() => {
+                    if (item.tooltip) Alert.alert(item.value, item.tooltip);
+                  }}
+                >
+                  <Text style={styles.completionText} numberOfLines={1}>
+                    {item.value}
+                  </Text>
+                </Pressable>
+              )}
+            />
+          </View>
+        )}
+
+        <View style={styles.composer}>
+          <View style={styles.historyControls}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.historyBtn,
+                pressed ? styles.historyBtnPressed : null,
+                inputHistory.length === 0 ? styles.historyBtnDisabled : null,
+              ]}
+              disabled={inputHistory.length === 0}
+              onPress={showPreviousInput}
+            >
+              <Text style={styles.historyText}>↑</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.historyBtn,
+                pressed ? styles.historyBtnPressed : null,
+                historyCursor == null ? styles.historyBtnDisabled : null,
+              ]}
+              disabled={historyCursor == null}
+              onPress={showNextInput}
+            >
+              <Text style={styles.historyText}>↓</Text>
+            </Pressable>
+          </View>
+          <TextInput
+            style={styles.input}
+            value={input}
+            onChangeText={handleInputChange}
+            placeholder={serverInfo.connected ? "Message or /command" : "Reconnect to send"}
+            placeholderTextColor={theme.textDim}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="send"
+            onSubmitEditing={handleSend}
+            editable={serverInfo.connected}
+          />
+          <Pressable
+            style={({ pressed }) => [
+              styles.sendBtn,
+              pressed && serverInfo.connected ? styles.sendBtnPressed : null,
+              !serverInfo.connected && styles.sendBtnDisabled,
+            ]}
+            onPress={handleSend}
+          >
+            <Text style={styles.sendText}>전송</Text>
+          </Pressable>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -627,16 +631,16 @@ function ConnectionPill({
   let label: string = "offline";
   let tone: "online" | "warning" | "error" | "neutral" = "error";
   if (state === "open" && connected) {
-    label = "online";
+    label = "접속";
     tone = "online";
   } else if (state === "open" && phase === "kicked") {
-    label = "kicked";
+    label = "킥";
     tone = "error";
   } else if (state === "open") {
-    label = "joining";
+    label = "입장";
     tone = "warning";
   } else if (state === "connecting" || state === "closed") {
-    label = "connecting";
+    label = "연결";
     tone = "warning";
   }
   return <StatusPill label={label} tone={tone} style={styles.pill} />;
@@ -646,6 +650,17 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.bg,
+    alignItems: "center",
+  },
+  chatShell: {
+    flex: 1,
+    width: "100%",
+    maxWidth: 900,
+    backgroundColor: theme.bg,
+    borderLeftColor: theme.glassBorder,
+    borderLeftWidth: 1,
+    borderRightColor: theme.glassBorder,
+    borderRightWidth: 1,
   },
   header: {
     flexDirection: "row",
@@ -676,6 +691,10 @@ const styles = StyleSheet.create({
   headerHead: {
     marginRight: 12,
   },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   headerIgn: {
     color: theme.text,
     fontSize: 19,
@@ -687,7 +706,14 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   pill: {
-    marginHorizontal: 8,
+    marginHorizontal: 0,
+  },
+  headerActions: {
+    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginLeft: 10,
   },
   logoutBtn: {
     width: 38,

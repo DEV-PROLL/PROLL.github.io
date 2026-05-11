@@ -7,7 +7,7 @@ interface ManagedSession {
   graceTimer: NodeJS.Timeout | null; // pending shutdown when refCount drops to 0
 }
 
-const GRACE_MS = 30 * 1000;
+const GRACE_MS = 5 * 1000;
 
 // Tracks one McSession per logged-in user. Multiple WS clients (e.g. an
 // iPhone and an iPad) can attach to the same user and share a single bot.
@@ -71,8 +71,9 @@ export class SessionManager {
     entry.session.off("message", listener);
     entry.refCount = Math.max(0, entry.refCount - 1);
     if (entry.refCount === 0) {
-      // Wait GRACE_MS before disconnecting the bot in case the user is
-      // just briefly losing network (background, lock screen, etc.).
+      // Wait briefly before disconnecting the bot in case the user is just
+      // losing network for a moment. Keep this short so server-side player
+      // counts reflect closed mobile sessions quickly.
       entry.graceTimer = setTimeout(() => {
         entry.session.shutdown("client disconnected");
         this.sessions.delete(sessionId);

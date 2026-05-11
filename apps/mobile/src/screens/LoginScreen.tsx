@@ -269,8 +269,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingTop: 58,
     paddingBottom: 32,
+    alignItems: "center",
   },
   header: {
+    width: "100%",
+    maxWidth: 560,
     minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
@@ -299,6 +302,8 @@ const styles = StyleSheet.create({
     marginRight: 42,
   },
   serverLine: {
+    width: "100%",
+    maxWidth: 560,
     color: theme.textDim,
     fontSize: 13,
     textAlign: "center",
@@ -306,6 +311,8 @@ const styles = StyleSheet.create({
     marginBottom: 26,
   },
   centerCard: {
+    width: "100%",
+    maxWidth: 560,
     alignItems: "center",
     padding: 24,
   },
@@ -316,6 +323,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   actions: {
+    width: "100%",
+    maxWidth: 560,
     gap: 16,
   },
   accountList: {
@@ -379,6 +388,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   codeCard: {
+    width: "100%",
+    maxWidth: 560,
     alignItems: "center",
     padding: 22,
   },
@@ -417,6 +428,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   error: {
+    width: "100%",
+    maxWidth: 560,
     color: theme.danger,
     marginTop: 24,
     textAlign: "center",

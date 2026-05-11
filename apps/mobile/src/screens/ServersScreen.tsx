@@ -39,6 +39,14 @@ interface Props {
   ) => void;
 }
 
+interface ServerStatus {
+  online: number | null;
+  max: number | null;
+  version: string | null;
+  ok: boolean;
+  loading: boolean;
+}
+
 export function ServersScreen({ onContinue }: Props) {
   const [serverAddress, setLocalServerAddress] = useState(DEFAULT_SERVER_ADDRESS);
   const [bridgeUrl, setLocalBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
@@ -48,6 +56,13 @@ export function ServersScreen({ onContinue }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [serverStatus, setServerStatus] = useState<ServerStatus>({
+    online: null,
+    max: null,
+    version: null,
+    ok: false,
+    loading: true,
+  });
 
   useEffect(() => {
     void Promise.all([
@@ -63,6 +78,26 @@ export function ServersScreen({ onContinue }: Props) {
       setLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const poll = async () => {
+      const next = await fetchServerStatus(bridgeUrl);
+      if (!cancelled) setServerStatus(next);
+    };
+
+    void poll();
+    timer = setInterval(() => {
+      void poll();
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [bridgeUrl]);
 
   const handleConnect = async () => {
     setFormError(null);
@@ -126,8 +161,11 @@ export function ServersScreen({ onContinue }: Props) {
 
       <GlassPanel style={styles.card}>
         <View style={styles.metaRow}>
-          <StatusPill label="온라인 69명" tone="online" />
-          <StatusPill label="MC 1.21.11" />
+          <StatusPill
+            label={formatOnlineStatus(serverStatus)}
+            tone={serverStatus.ok ? "online" : serverStatus.loading ? "warning" : "error"}
+          />
+          <StatusPill label={serverStatus.version ?? `MC ${DEFAULT_MC_VERSION}`} />
         </View>
 
         <View style={styles.divider} />
@@ -211,6 +249,54 @@ function normalizeServerAddress(address: string): string {
     .replace(/:25565$/, "");
 }
 
+async function fetchServerStatus(bridgeUrl: string): Promise<ServerStatus> {
+  try {
+    const url = toStatusUrl(bridgeUrl);
+    const response = await fetch(url, {
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (!response.ok) {
+      throw new Error(`status ${response.status}`);
+    }
+    const body = (await response.json()) as {
+      ok?: boolean;
+      playersOnline?: unknown;
+      playersMax?: unknown;
+      version?: unknown;
+    };
+    if (!body.ok) throw new Error("server status unavailable");
+    return {
+      online: typeof body.playersOnline === "number" ? body.playersOnline : null,
+      max: typeof body.playersMax === "number" ? body.playersMax : null,
+      version: typeof body.version === "string" ? body.version : null,
+      ok: true,
+      loading: false,
+    };
+  } catch {
+    return {
+      online: null,
+      max: null,
+      version: null,
+      ok: false,
+      loading: false,
+    };
+  }
+}
+
+function toStatusUrl(bridgeUrl: string): string {
+  const url = new URL(bridgeUrl);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.pathname = "/status";
+  return url.toString();
+}
+
+function formatOnlineStatus(status: ServerStatus): string {
+  if (status.loading) return "상태 확인 중";
+  if (!status.ok || status.online == null) return "상태 확인 불가";
+  if (status.max != null) return `온라인 ${status.online}/${status.max}명`;
+  return `온라인 ${status.online}명`;
+}
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -224,9 +310,12 @@ const styles = StyleSheet.create({
     minHeight: "100%",
     paddingHorizontal: 24,
     paddingVertical: 42,
+    alignItems: "center",
     justifyContent: "center",
   },
   hero: {
+    width: "100%",
+    maxWidth: 520,
     alignItems: "center",
     marginBottom: 26,
   },
@@ -256,6 +345,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   card: {
+    width: "100%",
+    maxWidth: 520,
     padding: 20,
   },
   metaRow: {
@@ -330,6 +421,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   help: {
+    width: "100%",
+    maxWidth: 520,
     color: theme.textDim,
     fontSize: 12,
     marginTop: 24,
