@@ -72,6 +72,7 @@ export function ChatScreen({
     phase: "joining" | "online" | "offline" | "kicked";
   }>({ connected: false, phase: "joining" });
   const [activeWindow, setActiveWindow] = useState<GuiWindow | null>(null);
+  const [selectedWindowSlot, setSelectedWindowSlot] = useState<number | null>(null);
   const [pendingSlot, setPendingSlot] = useState<number | null>(null);
   const listRef = useRef<FlatList<DisplayedMessage>>(null);
   const completionRequestRef = useRef("");
@@ -123,6 +124,7 @@ export function ChatScreen({
         case "status":
           if (!msg.connected) {
             setActiveWindow(null);
+            setSelectedWindowSlot(null);
             setPendingSlot(null);
           }
           setServerInfo({
@@ -141,12 +143,22 @@ export function ChatScreen({
           }
           break;
         case "window_open":
+          setActiveWindow(msg.window);
+          setSelectedWindowSlot(null);
+          setPendingSlot(null);
+          break;
         case "window_update":
           setActiveWindow(msg.window);
+          setSelectedWindowSlot((current) =>
+            current != null && visibleGuiSlots(msg.window).some((slot) => slot.index === current)
+              ? current
+              : null,
+          );
           setPendingSlot(null);
           break;
         case "window_close":
           setActiveWindow(null);
+          setSelectedWindowSlot(null);
           setPendingSlot(null);
           break;
         case "kicked":
@@ -156,6 +168,7 @@ export function ChatScreen({
             phase: "kicked",
           }));
           setActiveWindow(null);
+          setSelectedWindowSlot(null);
           setPendingSlot(null);
           setMessages((prev) => [
             ...prev,
@@ -374,7 +387,14 @@ export function ChatScreen({
     }
   };
 
-  const handleWindowSlotPress = (slot: GuiSlot) => {
+  const handleWindowSlotSelect = (slot: GuiSlot) => {
+    setSelectedWindowSlot(slot.index);
+  };
+
+  const handleWindowSelectedClick = () => {
+    if (!activeWindow || !serverInfo.connected || selectedWindowSlot == null) return;
+    const slot = activeWindow.slots.find((candidate) => candidate.index === selectedWindowSlot);
+    if (!slot?.item) return;
     if (!serverInfo.connected) return;
     setPendingSlot(slot.index);
     if (!send({ type: "window_click", slot: slot.index, mouseButton: 0 })) {
@@ -386,6 +406,7 @@ export function ChatScreen({
   const handleWindowClose = () => {
     send({ type: "window_close" });
     setActiveWindow(null);
+    setSelectedWindowSlot(null);
     setPendingSlot(null);
   };
 
@@ -540,9 +561,11 @@ export function ChatScreen({
         {activeWindow ? (
           <GuiWindowModal
             gui={activeWindow}
+            selectedSlotIndex={selectedWindowSlot}
             pendingSlot={pendingSlot}
             onClose={handleWindowClose}
-            onSlotPress={handleWindowSlotPress}
+            onSlotSelect={handleWindowSlotSelect}
+            onClickSelected={handleWindowSelectedClick}
           />
         ) : null}
       </View>
@@ -703,16 +726,27 @@ function ConnectionPill({
 
 function GuiWindowModal({
   gui,
+  selectedSlotIndex,
   pendingSlot,
   onClose,
-  onSlotPress,
+  onSlotSelect,
+  onClickSelected,
 }: {
   gui: GuiWindow;
+  selectedSlotIndex: number | null;
   pendingSlot: number | null;
   onClose: () => void;
-  onSlotPress: (slot: GuiSlot) => void;
+  onSlotSelect: (slot: GuiSlot) => void;
+  onClickSelected: () => void;
 }) {
-  const filled = gui.slots.filter((slot) => slot.item).length;
+  const visibleSlots = visibleGuiSlots(gui);
+  const selectedSlot =
+    selectedSlotIndex == null
+      ? null
+      : visibleSlots.find((slot) => slot.index === selectedSlotIndex) ?? null;
+  const selectedItem = selectedSlot?.item ?? null;
+  const filled = visibleSlots.filter((slot) => slot.item).length;
+  const canClickSelected = Boolean(selectedItem) && pendingSlot == null;
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -724,7 +758,7 @@ function GuiWindowModal({
                 {gui.title}
               </Text>
               <Text style={styles.guiSubtitle} numberOfLines={1}>
-                {gui.type} · {filled}/{gui.slotCount} slots
+                {gui.type} · 아이템 {filled}/{visibleSlots.length}
               </Text>
             </View>
             <Pressable style={styles.guiCloseBtn} onPress={onClose}>
@@ -734,25 +768,48 @@ function GuiWindowModal({
 
           <FlatList
             key={`gui-${gui.id}`}
-            data={gui.slots}
+            data={visibleSlots}
             keyExtractor={(slot) => `${gui.id}-${slot.index}`}
             numColumns={9}
             contentContainerStyle={styles.guiGrid}
             renderItem={({ item }) => (
               <GuiSlotCell
                 slot={item}
+                selected={selectedSlotIndex === item.index}
                 pending={pendingSlot === item.index}
-                onPress={() => onSlotPress(item)}
+                onPreview={() => onSlotSelect(item)}
               />
             )}
           />
 
           <View style={styles.guiFooter}>
-            <Text style={styles.guiFooterText} numberOfLines={1}>
-              {gui.selectedItem
-                ? `Cursor: ${itemLabel(gui.selectedItem)}`
-                : "Tap a slot to click it in-game."}
-            </Text>
+            <View style={styles.guiSelectionCopy}>
+              <Text style={styles.guiFooterText} numberOfLines={1}>
+                {selectedItem
+                  ? itemLabel(selectedItem)
+                  : selectedSlot
+                    ? `빈 슬롯 ${selectedSlot.index}`
+                    : "슬롯을 선택하세요"}
+              </Text>
+              {gui.selectedItem ? (
+                <Text style={styles.guiCursorText} numberOfLines={1}>
+                  커서: {itemLabel(gui.selectedItem)}
+                </Text>
+              ) : null}
+            </View>
+            <Pressable
+              style={({ pressed }) => [
+                styles.guiActionBtn,
+                pressed && canClickSelected ? styles.guiActionBtnPressed : null,
+                !canClickSelected ? styles.guiActionBtnDisabled : null,
+              ]}
+              disabled={!canClickSelected}
+              onPress={onClickSelected}
+            >
+              <Text style={styles.guiActionText}>
+                {pendingSlot == null ? "클릭 실행" : "처리 중"}
+              </Text>
+            </Pressable>
           </View>
         </View>
       </View>
@@ -762,12 +819,14 @@ function GuiWindowModal({
 
 function GuiSlotCell({
   slot,
+  selected,
   pending,
-  onPress,
+  onPreview,
 }: {
   slot: GuiSlot;
+  selected: boolean;
   pending: boolean;
-  onPress: () => void;
+  onPreview: () => void;
 }) {
   const item = slot.item;
   const label = item ? shortItemLabel(item) : "";
@@ -778,10 +837,12 @@ function GuiSlotCell({
       style={({ pressed }) => [
         styles.guiSlot,
         item ? { borderColor: itemColor(item.name) } : null,
+        selected ? styles.guiSlotSelected : null,
         pressed ? styles.guiSlotPressed : null,
         pending ? styles.guiSlotPending : null,
       ]}
-      onPress={onPress}
+      onPress={onPreview}
+      onHoverIn={onPreview}
       onLongPress={() => Alert.alert(`Slot ${slot.index}`, detail)}
     >
       {item ? (
@@ -800,6 +861,15 @@ function GuiSlotCell({
       )}
     </Pressable>
   );
+}
+
+function visibleGuiSlots(gui: GuiWindow): GuiSlot[] {
+  const containerSlotCount =
+    Number.isFinite(gui.inventoryStart) && gui.inventoryStart > 0
+      ? gui.inventoryStart
+      : gui.slots.length;
+  const visibleSlots = gui.slots.filter((slot) => slot.index < containerSlotCount);
+  return visibleSlots.length > 0 ? visibleSlots : gui.slots;
 }
 
 function itemLabel(item: GuiItem): string {
@@ -1188,6 +1258,11 @@ const styles = StyleSheet.create({
     opacity: 0.78,
     transform: [{ scale: 0.94 }],
   },
+  guiSlotSelected: {
+    borderColor: theme.accent,
+    borderWidth: 2,
+    backgroundColor: "rgba(126, 231, 135, 0.1)",
+  },
   guiSlotPending: {
     borderColor: theme.accentSoft,
     backgroundColor: "rgba(126, 231, 135, 0.15)",
@@ -1220,14 +1295,52 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   guiFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopColor: theme.glassBorder,
     borderTopWidth: 1,
     backgroundColor: "rgba(22, 27, 34, 0.78)",
   },
+  guiSelectionCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   guiFooterText: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  guiCursorText: {
     color: theme.textDim,
-    fontSize: 12,
+    fontSize: 11,
+    marginTop: 3,
+  },
+  guiActionBtn: {
+    minWidth: 96,
+    minHeight: 40,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    backgroundColor: theme.accentMuted,
+    borderColor: "rgba(126, 231, 135, 0.46)",
+    borderWidth: 1,
+  },
+  guiActionBtnPressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.98 }],
+  },
+  guiActionBtnDisabled: {
+    opacity: 0.45,
+    backgroundColor: "rgba(139, 148, 158, 0.14)",
+    borderColor: theme.glassBorder,
+  },
+  guiActionText: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "900",
   },
 });
