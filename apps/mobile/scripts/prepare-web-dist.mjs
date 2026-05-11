@@ -22,9 +22,9 @@ if (!html.includes('rel="manifest"')) {
   html = html.replace(
     "</head>",
     [
-      '  <link rel="manifest" href="/manifest.json">',
-      '  <link rel="icon" href="/icon.svg" type="image/svg+xml">',
-      '  <link rel="apple-touch-icon" href="/icon.svg">',
+      '  <link rel="manifest" href="./manifest.json">',
+      '  <link rel="icon" href="./icon.svg" type="image/svg+xml">',
+      '  <link rel="apple-touch-icon" href="./icon.svg">',
       '  <meta name="apple-mobile-web-app-capable" content="yes">',
       '  <meta name="apple-mobile-web-app-title" content="PROLL">',
       '  <meta name="mobile-web-app-capable" content="yes">',
@@ -40,7 +40,7 @@ if (!html.includes("serviceWorker.register")) {
       "  <script>",
       '    if ("serviceWorker" in navigator) {',
       '      window.addEventListener("load", function () {',
-      '        navigator.serviceWorker.register("/service-worker.js").catch(function () {});',
+      '        navigator.serviceWorker.register("./service-worker.js").catch(function () {});',
       "      });",
       "    }",
       "  </script>",
@@ -48,6 +48,12 @@ if (!html.includes("serviceWorker.register")) {
     ].join("\n"),
   );
 }
+
+html = html
+  .replaceAll('href="/manifest.json"', 'href="./manifest.json"')
+  .replaceAll('href="/icon.svg"', 'href="./icon.svg"')
+  .replaceAll('src="/_expo/', 'src="./_expo/')
+  .replaceAll('navigator.serviceWorker.register("/service-worker.js")', 'navigator.serviceWorker.register("./service-worker.js")');
 
 html = html.replace(
   /\n?  <script id="rudulgi-runtime-config">[\s\S]*?<\/script>/,
