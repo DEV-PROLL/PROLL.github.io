@@ -65,11 +65,12 @@ export function ChatScreen({
   }>({ connected: false, phase: "joining" });
   const listRef = useRef<FlatList<DisplayedMessage>>(null);
   const completionRequestRef = useRef("");
-  const inputRef = useRef(input);
+  const latestInputRef = useRef(input);
+  const textInputRef = useRef<TextInput>(null);
   const historyDraftRef = useRef("");
 
   useEffect(() => {
-    inputRef.current = input;
+    latestInputRef.current = input;
   }, [input]);
 
   const scrollToBottom = useCallback((animated = true) => {
@@ -120,7 +121,7 @@ export function ChatScreen({
         case "completion":
           if (
             msg.requestId === completionRequestRef.current &&
-            msg.text === inputRef.current
+            msg.text === latestInputRef.current
           ) {
             setCompletionMatches(msg.matches);
           }
@@ -257,6 +258,9 @@ export function ChatScreen({
     historyDraftRef.current = "";
     setInput("");
     setCompletionMatches([]);
+    setTimeout(() => {
+      textInputRef.current?.focus();
+    }, 0);
   };
 
   const handleInputChange = (next: string) => {
@@ -468,6 +472,7 @@ export function ChatScreen({
             </Pressable>
           </View>
           <TextInput
+            ref={textInputRef}
             style={styles.input}
             value={input}
             onChangeText={handleInputChange}
@@ -477,6 +482,7 @@ export function ChatScreen({
             autoCapitalize="none"
             returnKeyType="send"
             onSubmitEditing={handleSend}
+            blurOnSubmit={false}
             editable={serverInfo.connected}
           />
           <Pressable
