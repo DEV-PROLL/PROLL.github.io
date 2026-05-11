@@ -175,7 +175,9 @@ export function LoginScreen({
                     <MinecraftHead uuid={account.uuid} size={58} />
                     <View style={styles.accountCopy}>
                       <Text style={styles.accountName}>{account.ign}</Text>
-                      <Text style={styles.accountSub}>최근 접속</Text>
+                      <Text style={styles.accountSub}>
+                        {formatLastUsed(account.lastUsedAt)}
+                      </Text>
                     </View>
                     <Text style={styles.chevron}>›</Text>
                   </Pressable>
@@ -241,6 +243,20 @@ function ConnectionPill({ state }: { state: ConnectionState }) {
   };
   const cfg = map[state];
   return <StatusPill label={cfg.label} tone={cfg.tone} />;
+}
+
+function formatLastUsed(timestamp: number): string {
+  if (!timestamp) return "최근 접속 기록 없음";
+  const diffMs = Date.now() - timestamp;
+  if (diffMs < 60_000) return "방금 접속";
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 60) return `${diffMin}분 전 접속`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}시간 전 접속`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 7) return `${diffDay}일 전 접속`;
+  const date = new Date(timestamp);
+  return `${date.getMonth() + 1}/${date.getDate()} 접속`;
 }
 
 const styles = StyleSheet.create({

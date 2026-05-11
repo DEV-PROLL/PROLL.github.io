@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -40,6 +41,7 @@ interface DisplayedMessage {
 
 let messageCounter = 0;
 const newId = () => `m-${++messageCounter}-${Date.now()}`;
+const MAX_INPUT_HISTORY = 50;
 
 export function ChatScreen({
   bridgeUrl,
@@ -52,6 +54,8 @@ export function ChatScreen({
 }: Props) {
   const [messages, setMessages] = useState<DisplayedMessage[]>([]);
   const [input, setInput] = useState("");
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<number | null>(null);
   const [completionMatches, setCompletionMatches] = useState<CompletionMatch[]>([]);
   const [serverInfo, setServerInfo] = useState<{
     server?: string;
@@ -62,10 +66,19 @@ export function ChatScreen({
   const listRef = useRef<FlatList<DisplayedMessage>>(null);
   const completionRequestRef = useRef("");
   const inputRef = useRef(input);
+  const historyDraftRef = useRef("");
 
   useEffect(() => {
     inputRef.current = input;
   }, [input]);
+
+  const scrollToBottom = useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated });
+    });
+    setTimeout(() => listRef.current?.scrollToEnd({ animated }), 80);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 260);
+  }, []);
 
   const handleMessage = useCallback(
     (msg: ServerMessage) => {
@@ -154,10 +167,41 @@ export function ChatScreen({
           break;
       }
     },
-    [onLogout],
+    [onLogout, userId],
   );
 
   const { state, send } = useBridge(bridgeUrl, true, handleMessage);
+
+  useEffect(() => {
+    scrollToBottom(true);
+  }, [messages.length, completionMatches.length, scrollToBottom]);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => scrollToBottom(false));
+    const frameSub = Keyboard.addListener("keyboardDidChangeFrame", () => scrollToBottom(false));
+    return () => {
+      showSub.remove();
+      frameSub.remove();
+    };
+  }, [scrollToBottom]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const viewport = (globalThis as unknown as {
+      visualViewport?: {
+        addEventListener: (type: "resize" | "scroll", listener: () => void) => void;
+        removeEventListener: (type: "resize" | "scroll", listener: () => void) => void;
+      };
+    }).visualViewport;
+    if (!viewport) return;
+    const handler = () => scrollToBottom(false);
+    viewport.addEventListener("resize", handler);
+    viewport.addEventListener("scroll", handler);
+    return () => {
+      viewport.removeEventListener("resize", handler);
+      viewport.removeEventListener("scroll", handler);
+    };
+  }, [scrollToBottom]);
 
   useEffect(() => {
     const query = input.trimStart();
@@ -205,8 +249,50 @@ export function ChatScreen({
       Alert.alert("Not connected", "Wait for the bridge to reconnect.");
       return;
     }
+    setInputHistory((prev) => {
+      const withoutDuplicateTail = prev[prev.length - 1] === text ? prev.slice(0, -1) : prev;
+      return [...withoutDuplicateTail, text].slice(-MAX_INPUT_HISTORY);
+    });
+    setHistoryCursor(null);
+    historyDraftRef.current = "";
     setInput("");
     setCompletionMatches([]);
+  };
+
+  const handleInputChange = (next: string) => {
+    setInput(next);
+    setHistoryCursor(null);
+    historyDraftRef.current = "";
+  };
+
+  const showPreviousInput = () => {
+    if (inputHistory.length === 0) return;
+    setHistoryCursor((current) => {
+      if (current == null) {
+        historyDraftRef.current = input;
+        const next = inputHistory.length - 1;
+        setInput(inputHistory[next]);
+        return next;
+      }
+      const next = Math.max(0, current - 1);
+      setInput(inputHistory[next]);
+      return next;
+    });
+  };
+
+  const showNextInput = () => {
+    if (inputHistory.length === 0) return;
+    setHistoryCursor((current) => {
+      if (current == null) return null;
+      if (current >= inputHistory.length - 1) {
+        setInput(historyDraftRef.current);
+        historyDraftRef.current = "";
+        return null;
+      }
+      const next = current + 1;
+      setInput(inputHistory[next]);
+      return next;
+    });
   };
 
   const handleCompletionPress = (match: CompletionMatch) => {
@@ -255,7 +341,7 @@ export function ChatScreen({
 
   const handleSegmentHover = (segment: ChatSegment) => {
     if (segment.hoverText) {
-      Alert.alert("Details", segment.hoverText);
+      Alert.alert("상세 정보", segment.hoverText);
     }
   };
 
@@ -294,15 +380,21 @@ export function ChatScreen({
           connected={serverInfo.connected}
           phase={serverInfo.phase}
         />
-        {state === "open" && !serverInfo.connected && (
-          <Pressable style={styles.reconnectBtn} onPress={reconnect}>
-            <Text style={styles.reconnectText}>Reconnect</Text>
-          </Pressable>
-        )}
         <Pressable style={styles.logoutBtn} onPress={confirmLogout}>
           <Text style={styles.logoutText}>•••</Text>
         </Pressable>
       </View>
+
+      {state === "open" && !serverInfo.connected && serverInfo.phase !== "joining" && (
+        <View style={styles.reconnectBanner}>
+          <Text style={styles.reconnectBannerText}>
+            {serverInfo.phase === "kicked" ? "서버에서 연결이 끊겼습니다." : "서버 연결이 끊겼습니다."}
+          </Text>
+          <Pressable style={styles.reconnectBtn} onPress={reconnect}>
+            <Text style={styles.reconnectText}>재접속</Text>
+          </Pressable>
+        </View>
+      )}
 
       <FlatList
         ref={listRef}
@@ -317,10 +409,9 @@ export function ChatScreen({
           />
         )}
         contentContainerStyle={styles.list}
-        onContentSizeChange={() =>
-          listRef.current?.scrollToEnd({ animated: true })
-        }
-        onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => scrollToBottom(true)}
+        onLayout={() => scrollToBottom(false)}
       />
 
       {completionMatches.length > 0 && (
@@ -349,10 +440,34 @@ export function ChatScreen({
       )}
 
       <View style={styles.composer}>
+        <View style={styles.historyControls}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.historyBtn,
+              pressed ? styles.historyBtnPressed : null,
+              inputHistory.length === 0 ? styles.historyBtnDisabled : null,
+            ]}
+            disabled={inputHistory.length === 0}
+            onPress={showPreviousInput}
+          >
+            <Text style={styles.historyText}>↑</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.historyBtn,
+              pressed ? styles.historyBtnPressed : null,
+              historyCursor == null ? styles.historyBtnDisabled : null,
+            ]}
+            disabled={historyCursor == null}
+            onPress={showNextInput}
+          >
+            <Text style={styles.historyText}>↓</Text>
+          </Pressable>
+        </View>
         <TextInput
           style={styles.input}
           value={input}
-          onChangeText={setInput}
+          onChangeText={handleInputChange}
           placeholder={serverInfo.connected ? "Message or /command" : "Reconnect to send"}
           placeholderTextColor={theme.textDim}
           autoCorrect={false}
@@ -459,9 +574,15 @@ function RichText({
               segment.bold ? styles.boldText : styles.normalWeightText,
               segment.italic ? styles.italicText : styles.normalText,
               textDecorationFor(segment),
-              clickable ? styles.clickableText : null,
+              clickable || hoverable ? styles.interactiveText : null,
             ]}
-            onPress={clickable ? () => onSegmentClick(segment) : undefined}
+            onPress={
+              clickable
+                ? () => onSegmentClick(segment)
+                : hoverable
+                  ? () => onSegmentHover(segment)
+                  : undefined
+            }
             onLongPress={hoverable ? () => onSegmentHover(segment) : undefined}
           >
             {segment.text}
@@ -576,23 +697,39 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     backgroundColor: "rgba(240, 246, 252, 0.06)",
   },
-  reconnectBtn: {
-    borderColor: theme.accent,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    marginRight: 6,
-  },
-  reconnectText: {
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: "700",
-  },
   logoutText: {
     color: theme.textDim,
     fontSize: 14,
     fontWeight: "900",
+  },
+  reconnectBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    backgroundColor: "rgba(210, 153, 34, 0.12)",
+    borderBottomColor: "rgba(210, 153, 34, 0.26)",
+    borderBottomWidth: 1,
+    gap: 10,
+  },
+  reconnectBannerText: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  reconnectBtn: {
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: "rgba(126, 231, 135, 0.12)",
+  },
+  reconnectText: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "800",
   },
   list: {
     paddingHorizontal: 18,
@@ -683,7 +820,7 @@ const styles = StyleSheet.create({
   underlineStrikeText: {
     textDecorationLine: "underline line-through",
   },
-  clickableText: {
+  interactiveText: {
     opacity: 0.95,
   },
   composer: {
@@ -695,6 +832,33 @@ const styles = StyleSheet.create({
     borderTopColor: theme.glassBorder,
     borderTopWidth: 1,
     gap: 8,
+  },
+  historyControls: {
+    width: 34,
+    gap: 6,
+  },
+  historyBtn: {
+    flex: 1,
+    minHeight: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: theme.inputGlass,
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+  },
+  historyBtnPressed: {
+    opacity: 0.75,
+    transform: [{ scale: 0.96 }],
+  },
+  historyBtnDisabled: {
+    opacity: 0.35,
+  },
+  historyText: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "900",
+    lineHeight: 16,
   },
   input: {
     flex: 1,
