@@ -72,7 +72,13 @@ export function ServersScreen({ onContinue }: Props) {
       getSavedAccounts(),
     ]).then(([storedBridgeUrl, version, address, savedAccounts]) => {
       if (address) setLocalServerAddress(address);
-      if (storedBridgeUrl) setLocalBridgeUrl(storedBridgeUrl);
+      const effectiveBridgeUrl = resolveInitialBridgeUrl(storedBridgeUrl);
+      if (effectiveBridgeUrl) {
+        setLocalBridgeUrl(effectiveBridgeUrl);
+        if (effectiveBridgeUrl !== storedBridgeUrl) {
+          void setBridgeUrl(effectiveBridgeUrl);
+        }
+      }
       if (version) setLocalMcVersion(version);
       setAccounts(savedAccounts);
       setLoading(false);
@@ -247,6 +253,14 @@ function normalizeServerAddress(address: string): string {
     .replace(/^wss?:\/\//, "")
     .replace(/\/.*$/, "")
     .replace(/:25565$/, "");
+}
+
+function resolveInitialBridgeUrl(storedBridgeUrl: string | null): string {
+  // The production PWA ships with the operator-managed bridge URL. Prefer it
+  // over any old localStorage value left from Expo, localhost, or Tailscale
+  // testing so normal users always land on the public app path.
+  if (!__DEV__ && DEFAULT_BRIDGE_URL) return DEFAULT_BRIDGE_URL;
+  return storedBridgeUrl || DEFAULT_BRIDGE_URL;
 }
 
 async function fetchServerStatus(bridgeUrl: string): Promise<ServerStatus> {
