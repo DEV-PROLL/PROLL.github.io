@@ -99,6 +99,13 @@ export function richSegments(msg: AnyChatMessage | string | undefined | null): C
   return merged.length > 0 ? merged : undefined;
 }
 
+export function componentPlainText(value: unknown): string {
+  const source = parseTextComponent(value);
+  const segments = flattenComponent(source, {}).flatMap(splitLegacyCodes);
+  const text = segments.map((segment) => segment.text).join("");
+  return replaceBrokenGlyphs(text).trim();
+}
+
 // Extract the speaker name when the chat is a `chat.type.text` translation
 // (vanilla format: `<player> message`). For system messages this returns null.
 export function extractSender(msg: AnyChatMessage | string | undefined | null): string | null {
@@ -209,6 +216,18 @@ function flattenTranslate(translate: string, withValue: unknown, style: SegmentS
     segments.push(...flattenComponent(arg, style));
   });
   return segments;
+}
+
+function parseTextComponent(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
 }
 
 function normalizeColor(value: unknown): string | undefined {

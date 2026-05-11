@@ -5,7 +5,13 @@ import type { Item } from "prismarine-item";
 import type { Window } from "prismarine-windows";
 import { normalizeAuthError } from "./auth";
 import type { CompletionMatch, GuiItem, GuiWindow, ServerMessage } from "./types";
-import { extractSender, plainText, rawJson, richSegments } from "./chat-format";
+import {
+  componentPlainText,
+  extractSender,
+  plainText,
+  rawJson,
+  richSegments,
+} from "./chat-format";
 
 export interface McSessionOptions {
   host: string;
@@ -495,13 +501,25 @@ function serializeWindow(window: Window): GuiWindow {
 
 function serializeItem(item: Item | null | undefined): GuiItem | null {
   if (!item) return null;
+  const displayName = componentPlainText(item.customName) || item.displayName;
+  const lore = serializeItemLore(item.customLore);
   return {
     name: item.name,
-    displayName: item.displayName,
+    displayName,
     count: item.count,
     type: item.type,
     metadata: item.metadata,
+    lore: lore.length > 0 ? lore : undefined,
   };
+}
+
+function serializeItemLore(lore: Item["customLore"]): string[] {
+  const lines = Array.isArray(lore) ? lore : typeof lore === "string" ? [lore] : [];
+  return lines
+    .flatMap((line) => componentPlainText(line).split(/\r?\n/))
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 16);
 }
 
 function normalizeWindowTitle(title: unknown): string {

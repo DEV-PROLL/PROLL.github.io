@@ -94,6 +94,7 @@ export interface GuiItem {
   count: number;
   type: number;
   metadata?: number;
+  lore?: string[];
 }
 
 export interface BridgeConfig {

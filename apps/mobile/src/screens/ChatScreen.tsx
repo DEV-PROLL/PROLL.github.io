@@ -796,6 +796,24 @@ function GuiWindowModal({
                   커서: {itemLabel(gui.selectedItem)}
                 </Text>
               ) : null}
+              {selectedItem?.lore?.length ? (
+                <View style={styles.guiLoreList}>
+                  {selectedItem.lore.slice(0, 6).map((line, index) => (
+                    <Text
+                      key={`${selectedItem.name}-${index}-${line}`}
+                      style={styles.guiLoreText}
+                      numberOfLines={2}
+                    >
+                      {line}
+                    </Text>
+                  ))}
+                  {selectedItem.lore.length > 6 ? (
+                    <Text style={styles.guiLoreMore}>
+                      +{selectedItem.lore.length - 6} lines
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
             <Pressable
               style={({ pressed }) => [
@@ -830,7 +848,7 @@ function GuiSlotCell({
 }) {
   const item = slot.item;
   const label = item ? shortItemLabel(item) : "";
-  const detail = item ? itemLabel(item) : `Empty slot ${slot.index}`;
+  const detail = item ? itemDetail(item) : `Empty slot ${slot.index}`;
 
   return (
     <Pressable
@@ -874,6 +892,11 @@ function visibleGuiSlots(gui: GuiWindow): GuiSlot[] {
 
 function itemLabel(item: GuiItem): string {
   return `${item.displayName || item.name}${item.count > 1 ? ` x${item.count}` : ""}`;
+}
+
+function itemDetail(item: GuiItem): string {
+  const lines = [itemLabel(item), ...(item.lore ?? [])];
+  return lines.join("\n");
 }
 
 function shortItemLabel(item: GuiItem): string {
@@ -1296,7 +1319,7 @@ const styles = StyleSheet.create({
   },
   guiFooter: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 10,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -1318,9 +1341,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 3,
   },
+  guiLoreList: {
+    marginTop: 7,
+    gap: 3,
+  },
+  guiLoreText: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  guiLoreMore: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+  },
   guiActionBtn: {
     minWidth: 96,
     minHeight: 40,
+    alignSelf: "center",
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
