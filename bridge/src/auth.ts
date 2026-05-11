@@ -86,7 +86,7 @@ export class AuthService {
       return { userId: ign, cacheUserId, ign, uuid, profilesFolder: userFolder };
     } catch (err) {
       await fs.rm(stagingFolder, { recursive: true, force: true });
-      throw err;
+      throw normalizeAuthError(err);
     }
   }
 
@@ -117,4 +117,29 @@ export class AuthService {
       profilesFolder: folder,
     };
   }
+}
+
+export function normalizeAuthError(err: unknown): Error {
+  const raw = err instanceof Error ? err.message : String(err);
+  const lower = raw.toLowerCase();
+
+  if (lower.includes("invalid_grant")) {
+    return new Error(
+      "Microsoft 인증 코드가 만료되었거나 이미 사용되었습니다. 새 코드를 발급받아 다시 로그인하세요.",
+    );
+  }
+
+  if (lower.includes("authorization_pending")) {
+    return new Error("Microsoft 로그인이 아직 완료되지 않았습니다.");
+  }
+
+  if (lower.includes("expired_token") || lower.includes("authorization_declined")) {
+    return new Error("Microsoft 로그인이 만료되었거나 취소되었습니다. 다시 로그인하세요.");
+  }
+
+  if (lower.includes("minecraft profile missing")) {
+    return new Error("이 Microsoft 계정에 Minecraft Java Edition 프로필이 없습니다.");
+  }
+
+  return err instanceof Error ? err : new Error(raw);
 }

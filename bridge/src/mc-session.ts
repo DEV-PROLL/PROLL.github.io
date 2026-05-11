@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import mineflayer from "mineflayer";
 import type { Bot } from "mineflayer";
+import { normalizeAuthError } from "./auth";
 import type { CompletionMatch, ServerMessage } from "./types";
 import { extractSender, plainText, rawJson, richSegments } from "./chat-format";
 
@@ -157,6 +158,13 @@ export class McSession extends EventEmitter {
 
     bot.on("error", (err: Error) => {
       console.error("[mc-session] bot error", err);
+      if (isMicrosoftAuthError(err)) {
+        this.emitMsg({
+          type: "auth_failed",
+          reason: normalizeAuthError(err).message,
+        });
+        return;
+      }
       this.emitMsg({ type: "error", text: err.message });
     });
   }
@@ -434,6 +442,16 @@ function normalizeKickReason(reason: unknown): string {
     }
   }
   return flattenKickComponent(reason) || JSON.stringify(reason);
+}
+
+function isMicrosoftAuthError(err: Error): boolean {
+  const message = err.message.toLowerCase();
+  return (
+    message.includes("invalid_grant") ||
+    message.includes("post_request_failed") ||
+    message.includes("expired_token") ||
+    message.includes("authorization_declined")
+  );
 }
 
 function flattenKickComponent(value: unknown): string {

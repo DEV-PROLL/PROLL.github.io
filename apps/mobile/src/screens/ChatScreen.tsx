@@ -16,6 +16,7 @@ import { theme } from "../theme";
 import type { ChatSegment, CompletionMatch, ServerMessage } from "../protocol";
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
+import { removeSavedAccount } from "../store/settings";
 
 interface Props {
   bridgeUrl: string;
@@ -139,7 +140,8 @@ export function ChatScreen({
           ]);
           break;
         case "auth_failed":
-          Alert.alert("Auth failed", msg.reason, [
+          void removeSavedAccount(userId);
+          Alert.alert("다시 로그인 필요", msg.reason, [
             {
               text: "OK",
               onPress: () => {
