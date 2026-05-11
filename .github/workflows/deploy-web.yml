@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -39,12 +40,29 @@ jobs:
         run: npm run bridge:build
 
       - name: Export web app
-        run: npm run web:export
         env:
-          EXPO_PUBLIC_BRIDGE_URL: ${{ vars.EXPO_PUBLIC_BRIDGE_URL }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          EXPO_PUBLIC_BRIDGE_URL="$(
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/variables/EXPO_PUBLIC_BRIDGE_URL" \
+              | node -e 'let d=""; process.stdin.on("data", c => d += c); process.stdin.on("end", () => process.stdout.write(JSON.parse(d).value || ""));'
+          )"
+          if [ -z "${EXPO_PUBLIC_BRIDGE_URL}" ]; then
+            echo "EXPO_PUBLIC_BRIDGE_URL is not configured"
+            exit 1
+          fi
+          echo "::add-mask::${EXPO_PUBLIC_BRIDGE_URL}"
+          export EXPO_PUBLIC_BRIDGE_URL
+          npm run web:export
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
