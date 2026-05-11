@@ -5,6 +5,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -14,7 +15,14 @@ import {
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { theme } from "../theme";
-import type { ChatSegment, CompletionMatch, ServerMessage } from "../protocol";
+import type {
+  ChatSegment,
+  CompletionMatch,
+  GuiItem,
+  GuiSlot,
+  GuiWindow,
+  ServerMessage,
+} from "../protocol";
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
 import { removeSavedAccount } from "../store/settings";
@@ -63,6 +71,8 @@ export function ChatScreen({
     connected: boolean;
     phase: "joining" | "online" | "offline" | "kicked";
   }>({ connected: false, phase: "joining" });
+  const [activeWindow, setActiveWindow] = useState<GuiWindow | null>(null);
+  const [pendingSlot, setPendingSlot] = useState<number | null>(null);
   const listRef = useRef<FlatList<DisplayedMessage>>(null);
   const completionRequestRef = useRef("");
   const latestInputRef = useRef(input);
@@ -111,6 +121,10 @@ export function ChatScreen({
           ]);
           break;
         case "status":
+          if (!msg.connected) {
+            setActiveWindow(null);
+            setPendingSlot(null);
+          }
           setServerInfo({
             server: msg.server,
             online: msg.playersOnline,
@@ -126,12 +140,23 @@ export function ChatScreen({
             setCompletionMatches(msg.matches);
           }
           break;
+        case "window_open":
+        case "window_update":
+          setActiveWindow(msg.window);
+          setPendingSlot(null);
+          break;
+        case "window_close":
+          setActiveWindow(null);
+          setPendingSlot(null);
+          break;
         case "kicked":
           setServerInfo((prev) => ({
             ...prev,
             connected: false,
             phase: "kicked",
           }));
+          setActiveWindow(null);
+          setPendingSlot(null);
           setMessages((prev) => [
             ...prev,
             {
@@ -349,6 +374,21 @@ export function ChatScreen({
     }
   };
 
+  const handleWindowSlotPress = (slot: GuiSlot) => {
+    if (!serverInfo.connected) return;
+    setPendingSlot(slot.index);
+    if (!send({ type: "window_click", slot: slot.index, mouseButton: 0 })) {
+      setPendingSlot(null);
+      Alert.alert("Not connected", "Wait for the bridge to reconnect.");
+    }
+  };
+
+  const handleWindowClose = () => {
+    send({ type: "window_close" });
+    setActiveWindow(null);
+    setPendingSlot(null);
+  };
+
   const handleLogoutInternal = () => {
     send({ type: "logout" });
     onLogout();
@@ -496,6 +536,15 @@ export function ChatScreen({
             <Text style={styles.sendText}>전송</Text>
           </Pressable>
         </View>
+
+        {activeWindow ? (
+          <GuiWindowModal
+            gui={activeWindow}
+            pendingSlot={pendingSlot}
+            onClose={handleWindowClose}
+            onSlotPress={handleWindowSlotPress}
+          />
+        ) : null}
       </View>
     </KeyboardAvoidingView>
   );
@@ -650,6 +699,141 @@ function ConnectionPill({
     tone = "warning";
   }
   return <StatusPill label={label} tone={tone} style={styles.pill} />;
+}
+
+function GuiWindowModal({
+  gui,
+  pendingSlot,
+  onClose,
+  onSlotPress,
+}: {
+  gui: GuiWindow;
+  pendingSlot: number | null;
+  onClose: () => void;
+  onSlotPress: (slot: GuiSlot) => void;
+}) {
+  const filled = gui.slots.filter((slot) => slot.item).length;
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.guiBackdrop}>
+        <View style={styles.guiPanel}>
+          <View style={styles.guiHeader}>
+            <View style={styles.guiTitleWrap}>
+              <Text style={styles.guiTitle} numberOfLines={1}>
+                {gui.title}
+              </Text>
+              <Text style={styles.guiSubtitle} numberOfLines={1}>
+                {gui.type} · {filled}/{gui.slotCount} slots
+              </Text>
+            </View>
+            <Pressable style={styles.guiCloseBtn} onPress={onClose}>
+              <Text style={styles.guiCloseText}>×</Text>
+            </Pressable>
+          </View>
+
+          <FlatList
+            key={`gui-${gui.id}`}
+            data={gui.slots}
+            keyExtractor={(slot) => `${gui.id}-${slot.index}`}
+            numColumns={9}
+            contentContainerStyle={styles.guiGrid}
+            renderItem={({ item }) => (
+              <GuiSlotCell
+                slot={item}
+                pending={pendingSlot === item.index}
+                onPress={() => onSlotPress(item)}
+              />
+            )}
+          />
+
+          <View style={styles.guiFooter}>
+            <Text style={styles.guiFooterText} numberOfLines={1}>
+              {gui.selectedItem
+                ? `Cursor: ${itemLabel(gui.selectedItem)}`
+                : "Tap a slot to click it in-game."}
+            </Text>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function GuiSlotCell({
+  slot,
+  pending,
+  onPress,
+}: {
+  slot: GuiSlot;
+  pending: boolean;
+  onPress: () => void;
+}) {
+  const item = slot.item;
+  const label = item ? shortItemLabel(item) : "";
+  const detail = item ? itemLabel(item) : `Empty slot ${slot.index}`;
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.guiSlot,
+        item ? { borderColor: itemColor(item.name) } : null,
+        pressed ? styles.guiSlotPressed : null,
+        pending ? styles.guiSlotPending : null,
+      ]}
+      onPress={onPress}
+      onLongPress={() => Alert.alert(`Slot ${slot.index}`, detail)}
+    >
+      {item ? (
+        <>
+          <View style={[styles.guiItemIcon, { backgroundColor: itemColor(item.name) }]}>
+            <Text style={styles.guiItemIconText} numberOfLines={1}>
+              {label}
+            </Text>
+          </View>
+          {item.count > 1 ? (
+            <Text style={styles.guiItemCount}>{item.count}</Text>
+          ) : null}
+        </>
+      ) : (
+        <Text style={styles.guiEmptySlotText}>{slot.index}</Text>
+      )}
+    </Pressable>
+  );
+}
+
+function itemLabel(item: GuiItem): string {
+  return `${item.displayName || item.name}${item.count > 1 ? ` x${item.count}` : ""}`;
+}
+
+function shortItemLabel(item: GuiItem): string {
+  const cleaned = (item.displayName || item.name)
+    .replace(/^minecraft:/, "")
+    .replace(/_/g, " ")
+    .trim();
+  if (!cleaned) return "?";
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+  }
+  return cleaned.slice(0, 2).toUpperCase();
+}
+
+function itemColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  const colors = [
+    "#3fb950",
+    "#58a6ff",
+    "#d29922",
+    "#a371f7",
+    "#f778ba",
+    "#56d4dd",
+    "#f85149",
+  ];
+  return colors[hash % colors.length];
 }
 
 const styles = StyleSheet.create({
@@ -926,5 +1110,124 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontWeight: "900",
     fontSize: 16,
+  },
+  guiBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.58)",
+    paddingHorizontal: 12,
+    paddingBottom: Platform.OS === "ios" ? 22 : 12,
+  },
+  guiPanel: {
+    width: "100%",
+    maxWidth: 760,
+    maxHeight: "82%",
+    backgroundColor: "rgba(13, 17, 23, 0.96)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+    borderRadius: 24,
+    overflow: "hidden",
+  },
+  guiHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomColor: theme.glassBorder,
+    borderBottomWidth: 1,
+  },
+  guiTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  guiTitle: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  guiSubtitle: {
+    color: theme.textDim,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  guiCloseBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(240, 246, 252, 0.06)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+  },
+  guiCloseText: {
+    color: theme.text,
+    fontSize: 24,
+    lineHeight: 27,
+    fontWeight: "800",
+  },
+  guiGrid: {
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+  },
+  guiSlot: {
+    width: 36,
+    height: 36,
+    margin: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "rgba(22, 27, 34, 0.86)",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  guiSlotPressed: {
+    opacity: 0.78,
+    transform: [{ scale: 0.94 }],
+  },
+  guiSlotPending: {
+    borderColor: theme.accentSoft,
+    backgroundColor: "rgba(126, 231, 135, 0.15)",
+  },
+  guiItemIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  guiItemIconText: {
+    color: "#ffffff",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  guiItemCount: {
+    position: "absolute",
+    right: 3,
+    bottom: 1,
+    color: theme.text,
+    fontSize: 10,
+    fontWeight: "900",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowRadius: 2,
+  },
+  guiEmptySlotText: {
+    color: "rgba(139, 148, 158, 0.35)",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  guiFooter: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopColor: theme.glassBorder,
+    borderTopWidth: 1,
+    backgroundColor: "rgba(22, 27, 34, 0.78)",
+  },
+  guiFooterText: {
+    color: theme.textDim,
+    fontSize: 12,
   },
 });

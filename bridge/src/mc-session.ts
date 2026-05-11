@@ -1,8 +1,10 @@
 import { EventEmitter } from "events";
 import mineflayer from "mineflayer";
 import type { Bot } from "mineflayer";
+import type { Item } from "prismarine-item";
+import type { Window } from "prismarine-windows";
 import { normalizeAuthError } from "./auth";
-import type { CompletionMatch, ServerMessage } from "./types";
+import type { CompletionMatch, GuiItem, GuiWindow, ServerMessage } from "./types";
 import { extractSender, plainText, rawJson, richSegments } from "./chat-format";
 
 export interface McSessionOptions {
@@ -41,6 +43,8 @@ export class McSession extends EventEmitter {
   private shuttingDown = false;
   private connected = false;
   private lastChatAt = 0;
+  private currentGuiWindow: Window | null = null;
+  private currentGuiWindowListener: ((...args: unknown[]) => void) | null = null;
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
@@ -146,6 +150,7 @@ export class McSession extends EventEmitter {
 
     bot.on("end", (reason: string) => {
       this.stopAntiAfk();
+      this.detachGuiWindow();
       this.connected = false;
       this.emitMsg({
         type: "status",
@@ -166,6 +171,17 @@ export class McSession extends EventEmitter {
         return;
       }
       this.emitMsg({ type: "error", text: err.message });
+    });
+
+    bot.on("windowOpen", (window) => {
+      this.attachGuiWindow(window);
+      this.emitWindowSnapshot("window_open", window);
+    });
+
+    bot.on("windowClose", (window) => {
+      const windowId = typeof window?.id === "number" ? window.id : undefined;
+      this.detachGuiWindow();
+      this.emitMsg({ type: "window_close", windowId });
     });
   }
 
@@ -264,12 +280,80 @@ export class McSession extends EventEmitter {
     }
   }
 
+  async clickWindow(
+    slot: number,
+    mouseButton: 0 | 1 = 0,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const bot = this.bot;
+    const window = bot?.currentWindow ?? this.currentGuiWindow;
+    if (!bot || !this.connected) return { ok: false, reason: "not connected" };
+    if (!window) return { ok: false, reason: "no open window" };
+    if (!Number.isInteger(slot) || slot < 0 || slot >= window.slots.length) {
+      return { ok: false, reason: "invalid slot" };
+    }
+    if (mouseButton !== 0 && mouseButton !== 1) {
+      return { ok: false, reason: "invalid mouse button" };
+    }
+
+    try {
+      await bot.clickWindow(slot, mouseButton, 0);
+      const updated = bot.currentWindow ?? this.currentGuiWindow;
+      if (updated) this.emitWindowSnapshot("window_update", updated);
+      return { ok: true };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason };
+    }
+  }
+
+  closeWindow(): { ok: true } | { ok: false; reason: string } {
+    const bot = this.bot;
+    const window = bot?.currentWindow ?? this.currentGuiWindow;
+    if (!bot || !this.connected) return { ok: false, reason: "not connected" };
+    if (!window) return { ok: false, reason: "no open window" };
+
+    try {
+      bot.closeWindow(window);
+      return { ok: true };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason };
+    }
+  }
+
   // Push a message to listeners and store it in the per-user history ring.
   private emitMsg(msg: ServerMessage): void {
     if (msg.type === "chat" || msg.type === "system") {
       this.history.push(msg);
     }
     this.emit("message", msg);
+  }
+
+  private attachGuiWindow(window: Window): void {
+    this.detachGuiWindow();
+    this.currentGuiWindow = window;
+    this.currentGuiWindowListener = () => {
+      this.emitWindowSnapshot("window_update", window);
+    };
+    (window as unknown as EventEmitter).on("updateSlot", this.currentGuiWindowListener);
+  }
+
+  private detachGuiWindow(): void {
+    if (this.currentGuiWindow && this.currentGuiWindowListener) {
+      (this.currentGuiWindow as unknown as EventEmitter).off(
+        "updateSlot",
+        this.currentGuiWindowListener,
+      );
+    }
+    this.currentGuiWindow = null;
+    this.currentGuiWindowListener = null;
+  }
+
+  private emitWindowSnapshot(type: "window_open" | "window_update", window: Window): void {
+    this.emitMsg({
+      type,
+      window: serializeWindow(window),
+    });
   }
 
   history50(): ServerMessage[] {
@@ -295,6 +379,7 @@ export class McSession extends EventEmitter {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     this.stopAntiAfk();
+    this.detachGuiWindow();
     const bot = this.bot;
     this.bot = null;
     if (bot) {
@@ -389,6 +474,45 @@ function normalizeCompletions(matches: unknown[] | undefined): CompletionMatch[]
     if (normalized.length >= 24) break;
   }
   return normalized;
+}
+
+function serializeWindow(window: Window): GuiWindow {
+  return {
+    id: window.id,
+    type: String(window.type),
+    title: normalizeWindowTitle(window.title),
+    slotCount: window.slots.length,
+    inventoryStart: window.inventoryStart,
+    inventoryEnd: window.inventoryEnd,
+    hotbarStart: window.hotbarStart,
+    selectedItem: serializeItem(window.selectedItem),
+    slots: window.slots.map((item, index) => ({
+      index,
+      item: serializeItem(item),
+    })),
+  };
+}
+
+function serializeItem(item: Item | null | undefined): GuiItem | null {
+  if (!item) return null;
+  return {
+    name: item.name,
+    displayName: item.displayName,
+    count: item.count,
+    type: item.type,
+    metadata: item.metadata,
+  };
+}
+
+function normalizeWindowTitle(title: unknown): string {
+  if (typeof title === "string") {
+    try {
+      return flattenKickComponent(JSON.parse(title)) || title;
+    } catch {
+      return title || "Window";
+    }
+  }
+  return flattenKickComponent(title) || "Window";
 }
 
 const CONFIGURATION_SERVERBOUND_PACKETS = new Set([

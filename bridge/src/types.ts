@@ -6,6 +6,8 @@ export type ClientMessage =
   | { type: "auth_cached"; userId: string; mcVersion?: string }
   | { type: "send"; text: string }
   | { type: "complete"; requestId: string; text: string }
+  | { type: "window_click"; slot: number; mouseButton?: 0 | 1 }
+  | { type: "window_close" }
   | { type: "logout" }
   | { type: "ping" };
 
@@ -41,6 +43,11 @@ export type ServerMessage =
       text: string;
       matches: CompletionMatch[];
     }
+  | {
+      type: "window_open" | "window_update";
+      window: GuiWindow;
+    }
+  | { type: "window_close"; windowId?: number }
   | { type: "kicked"; reason: string }
   | { type: "error"; text: string }
   | { type: "pong" };
@@ -62,6 +69,31 @@ export interface ChatSegment {
     value: string;
   };
   hoverText?: string;
+}
+
+export interface GuiWindow {
+  id: number;
+  type: string;
+  title: string;
+  slotCount: number;
+  inventoryStart: number;
+  inventoryEnd: number;
+  hotbarStart: number;
+  slots: GuiSlot[];
+  selectedItem?: GuiItem | null;
+}
+
+export interface GuiSlot {
+  index: number;
+  item: GuiItem | null;
+}
+
+export interface GuiItem {
+  name: string;
+  displayName: string;
+  count: number;
+  type: number;
+  metadata?: number;
 }
 
 export interface BridgeConfig {

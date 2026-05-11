@@ -344,6 +344,31 @@ async function handleMessage(
       return;
     }
 
+    case "window_click": {
+      if (!state.mcSession) {
+        send({ type: "error", text: "not authenticated" });
+        return;
+      }
+      const mouseButton = msg.mouseButton === 1 ? 1 : 0;
+      const result = await state.mcSession.clickWindow(msg.slot, mouseButton);
+      if (!result.ok) {
+        send({ type: "error", text: result.reason });
+      }
+      return;
+    }
+
+    case "window_close": {
+      if (!state.mcSession) {
+        send({ type: "error", text: "not authenticated" });
+        return;
+      }
+      const result = state.mcSession.closeWindow();
+      if (!result.ok) {
+        send({ type: "error", text: result.reason });
+      }
+      return;
+    }
+
     case "logout": {
       if (state.sessionId && state.listener) {
         sessions.detach(state.sessionId, state.listener);
