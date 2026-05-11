@@ -19,6 +19,12 @@
         "backgroundColor": "#0d1117"
       }
     },
+    "web": {
+      "bundler": "metro",
+      "display": "standalone",
+      "themeColor": "#0d1117",
+      "backgroundColor": "#0d1117"
+    },
     "plugins": [
       "expo-secure-store"
     ]

@@ -12,8 +12,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "mineflayer": "^4.23.0",
-    "prismarine-auth": "^2.5.0",
+    "dotenv": "^16.4.7",
+    "mineflayer": "^4.37.1",
+    "prismarine-auth": "^3.1.1",
     "prismarine-chat": "^1.10.1",
     "ws": "^8.18.0"
   },

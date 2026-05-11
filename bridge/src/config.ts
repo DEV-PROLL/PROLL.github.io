@@ -23,8 +23,9 @@ export function loadConfig(): BridgeConfig {
   return {
     mcHost: str("MC_HOST"),
     mcPort: num("MC_PORT", 25565),
-    mcVersion: str("MC_VERSION", "1.21.4"),
+    mcVersion: str("MC_VERSION", "1.21.11"),
     wsPort: num("WS_PORT", 8080),
+    bridgeToken: process.env.BRIDGE_TOKEN?.trim() || null,
     tokensDir: path.resolve(str("TOKENS_DIR", "./tokens")),
     allowedOrigins: allowed ? allowed.split(",").map((s) => s.trim()) : null,
     maxSessions: num("MAX_SESSIONS", 20),

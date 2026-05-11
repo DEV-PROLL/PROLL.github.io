@@ -1,25 +1,31 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as WebBrowser from "expo-web-browser";
+import { GlassPanel, MinecraftHead, PrimaryButton, StatusPill } from "../components/RudulgiUI";
 import { theme } from "../theme";
 import type { ServerMessage } from "../protocol";
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import {
-  getCachedUserId,
-  setCachedUserId,
-  clearCachedUserId,
+  getSavedAccounts,
+  removeSavedAccount,
+  saveAccount,
+  type SavedAccount,
 } from "../store/settings";
 
 interface Props {
   bridgeUrl: string;
-  onAuthenticated: (info: { ign: string; userId: string }) => void;
+  mcVersion: string;
+  serverAddress: string;
+  onAuthenticated: (info: { ign: string; userId: string; uuid?: string }) => void;
   onChangeServer: () => void;
 }
 
@@ -32,16 +38,22 @@ interface DeviceCode {
 // Drives the device-code login flow. We connect to the bridge, request a
 // device code, surface it for the user to enter at microsoft.com/link,
 // and wait for `auth_ok` before handing control to the chat screen.
-export function LoginScreen({ bridgeUrl, onAuthenticated, onChangeServer }: Props) {
+export function LoginScreen({
+  bridgeUrl,
+  mcVersion,
+  serverAddress,
+  onAuthenticated,
+  onChangeServer,
+}: Props) {
   const [deviceCode, setDeviceCode] = useState<DeviceCode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<"connecting" | "ready" | "auth_pending" | "done">(
     "connecting",
   );
-  const [cachedUserId, setCachedId] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
 
   useEffect(() => {
-    void getCachedUserId().then(setCachedId);
+    void getSavedAccounts().then(setAccounts);
   }, []);
 
   const handleMessage = (msg: ServerMessage) => {
@@ -56,16 +68,17 @@ export function LoginScreen({ bridgeUrl, onAuthenticated, onChangeServer }: Prop
         break;
       case "auth_ok":
         setPhase("done");
-        void setCachedUserId(msg.userId);
-        onAuthenticated({ ign: msg.ign, userId: msg.userId });
+        void saveAccount({
+          userId: msg.userId,
+          ign: msg.ign,
+          uuid: msg.uuid,
+        }).then(setAccounts);
+        onAuthenticated({ ign: msg.ign, userId: msg.userId, uuid: msg.uuid });
         break;
       case "auth_failed":
         setError(msg.reason);
         setPhase("ready");
         setDeviceCode(null);
-        // If a cached login failed, drop the cache so the user can re-auth.
-        void clearCachedUserId();
-        setCachedId(null);
         break;
       case "error":
         setError(msg.text);
@@ -85,13 +98,30 @@ export function LoginScreen({ bridgeUrl, onAuthenticated, onChangeServer }: Prop
 
   const startFresh = () => {
     setError(null);
-    send({ type: "auth_start" });
+    setDeviceCode(null);
+    send({ type: "auth_start", mcVersion });
   };
 
-  const startCached = () => {
-    if (!cachedUserId) return;
+  const startCached = (account: SavedAccount) => {
     setError(null);
-    send({ type: "auth_cached", userId: cachedUserId });
+    send({ type: "auth_cached", userId: account.userId, mcVersion });
+  };
+
+  const removeAccount = (account: SavedAccount) => {
+    Alert.alert(
+      "계정 삭제",
+      `${account.ign} 계정을 이 기기 목록에서 삭제할까요?`,
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "삭제",
+          style: "destructive",
+          onPress: () => {
+            void removeSavedAccount(account.userId).then(setAccounts);
+          },
+        },
+      ],
+    );
   };
 
   const copyCode = async () => {
@@ -105,183 +135,275 @@ export function LoginScreen({ bridgeUrl, onAuthenticated, onChangeServer }: Prop
   };
 
   return (
-    <View style={styles.root}>
-      <Pressable style={styles.changeServer} onPress={onChangeServer}>
-        <Text style={styles.changeServerText}>← Change bridge</Text>
-      </Pressable>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={styles.header}>
+        <Pressable style={styles.backButton} onPress={onChangeServer}>
+          <Text style={styles.backText}>‹</Text>
+        </Pressable>
+        <Text style={styles.headerTitle}>계정 선택</Text>
+        <ConnectionPill state={state} />
+      </View>
 
-      <Text style={styles.title}>Sign in</Text>
-      <Text style={styles.subtitle}>
-        Bridge: <Text style={styles.mono}>{bridgeUrl}</Text>
+      <Text style={styles.serverLine}>
+        {serverAddress} · MC {mcVersion}
       </Text>
-      <ConnectionPill state={state} />
 
       {phase === "connecting" && (
-        <View style={styles.center}>
+        <GlassPanel style={styles.centerCard}>
           <ActivityIndicator color={theme.accent} />
-          <Text style={styles.note}>Connecting to bridge…</Text>
-        </View>
+          <Text style={styles.note}>연결 준비 중</Text>
+        </GlassPanel>
       )}
 
       {phase === "ready" && (
         <View style={styles.actions}>
-          {cachedUserId && (
-            <Pressable style={styles.button} onPress={startCached}>
-              <Text style={styles.buttonText}>Continue as {cachedUserId}</Text>
-            </Pressable>
+          {accounts.length > 0 && (
+            <View style={styles.accountList}>
+              {accounts.map((account) => (
+                <View style={styles.accountShell} key={account.userId}>
+                  <Pressable
+                    onPress={() => startCached(account)}
+                    style={({ pressed }) => [
+                      styles.accountButton,
+                      pressed ? styles.accountButtonPressed : null,
+                    ]}
+                  >
+                    <MinecraftHead uuid={account.uuid} size={58} />
+                    <View style={styles.accountCopy}>
+                      <Text style={styles.accountName}>{account.ign}</Text>
+                      <Text style={styles.accountSub}>최근 접속</Text>
+                    </View>
+                    <Text style={styles.chevron}>›</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.removeButton,
+                      pressed ? styles.removeButtonPressed : null,
+                    ]}
+                    onPress={() => removeAccount(account)}
+                  >
+                    <Text style={styles.removeText}>삭제</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
           )}
-          <Pressable
-            style={[styles.button, !cachedUserId && styles.primary]}
-            onPress={startFresh}
-          >
-            <Text style={styles.buttonText}>Sign in with Microsoft</Text>
-          </Pressable>
+
+          <PrimaryButton onPress={startFresh} style={styles.microsoftButton}>
+            Microsoft 계정으로 로그인
+          </PrimaryButton>
         </View>
       )}
 
       {phase === "auth_pending" && deviceCode && (
-        <View style={styles.codeCard}>
-          <Text style={styles.note}>1. Open this link on any device:</Text>
+        <GlassPanel style={styles.codeCard}>
+          <Text style={styles.codeTitle}>Microsoft 로그인</Text>
+          <Text style={styles.note}>브라우저에서 링크를 열고 코드를 입력하세요.</Text>
           <Pressable onPress={openBrowser}>
             <Text style={styles.link}>{deviceCode.url}</Text>
           </Pressable>
-          <Text style={[styles.note, { marginTop: 16 }]}>
-            2. Enter this code:
-          </Text>
-          <Text style={styles.codeText}>{deviceCode.code}</Text>
-          <Pressable style={styles.button} onPress={copyCode}>
-            <Text style={styles.buttonText}>Copy code</Text>
+          <Pressable onPress={copyCode}>
+            <Text style={styles.codeText}>{deviceCode.code}</Text>
           </Pressable>
-          <Text style={styles.note}>
-            Waiting for you to finish signing in…
-          </Text>
-          <ActivityIndicator color={theme.accent} style={{ marginTop: 8 }} />
-        </View>
+          <PrimaryButton variant="secondary" onPress={copyCode} style={styles.copyButton}>
+            코드 복사
+          </PrimaryButton>
+          <View style={styles.waitRow}>
+            <ActivityIndicator color={theme.accent} />
+            <Text style={styles.waitText}>로그인 완료 대기 중</Text>
+          </View>
+        </GlassPanel>
+      )}
+
+      {phase === "done" && (
+        <GlassPanel style={styles.centerCard}>
+          <ActivityIndicator color={theme.accent} />
+          <Text style={styles.note}>서버에 접속 중</Text>
+        </GlassPanel>
       )}
 
       {error && <Text style={styles.error}>{error}</Text>}
-    </View>
+    </ScrollView>
   );
 }
 
 function ConnectionPill({ state }: { state: ConnectionState }) {
-  const map: Record<ConnectionState, { label: string; color: string }> = {
-    idle: { label: "idle", color: theme.textDim },
-    connecting: { label: "connecting", color: "#d29922" },
-    open: { label: "connected", color: theme.accent },
-    closed: { label: "reconnecting", color: "#d29922" },
-    error: { label: "error", color: theme.danger },
+  const map: Record<ConnectionState, { label: string; tone: "online" | "warning" | "error" | "neutral" }> = {
+    idle: { label: "idle", tone: "neutral" },
+    connecting: { label: "connecting", tone: "warning" },
+    open: { label: "online", tone: "online" },
+    closed: { label: "reconnecting", tone: "warning" },
+    error: { label: "error", tone: "error" },
   };
   const cfg = map[state];
-  return (
-    <View style={[styles.pill, { borderColor: cfg.color }]}>
-      <View style={[styles.pillDot, { backgroundColor: cfg.color }]} />
-      <Text style={[styles.pillText, { color: cfg.color }]}>{cfg.label}</Text>
-    </View>
-  );
+  return <StatusPill label={cfg.label} tone={cfg.tone} />;
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.bg,
-    padding: 24,
   },
-  changeServer: {
-    paddingVertical: 8,
+  content: {
+    minHeight: "100%",
+    paddingHorizontal: 22,
+    paddingTop: 58,
+    paddingBottom: 32,
   },
-  changeServerText: {
-    color: theme.textDim,
-  },
-  title: {
-    color: theme.text,
-    fontSize: 28,
-    fontWeight: "700",
-    marginTop: 24,
-  },
-  subtitle: {
-    color: theme.textDim,
-    marginTop: 4,
-  },
-  mono: {
-    fontFamily: "Courier",
-    color: theme.text,
-  },
-  pill: {
-    alignSelf: "flex-start",
+  header: {
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginTop: 12,
   },
-  pillDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  pillText: {
-    fontSize: 12,
-  },
-  center: {
-    marginTop: 64,
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(240, 246, 252, 0.06)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+  },
+  backText: {
+    color: theme.text,
+    fontSize: 34,
+    lineHeight: 38,
+  },
+  headerTitle: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: "900",
+    textAlign: "center",
+    marginRight: 42,
+  },
+  serverLine: {
+    color: theme.textDim,
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 8,
+    marginBottom: 26,
+  },
+  centerCard: {
+    alignItems: "center",
+    padding: 24,
   },
   note: {
     color: theme.textDim,
-    marginTop: 8,
+    marginTop: 10,
     textAlign: "center",
+    lineHeight: 20,
   },
   actions: {
-    marginTop: 32,
+    gap: 16,
+  },
+  accountList: {
     gap: 12,
   },
-  button: {
-    backgroundColor: theme.cardElevated,
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: 14,
+  accountShell: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  accountButton: {
+    flex: 1,
+    minHeight: 96,
+    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: theme.glass,
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+    borderRadius: 24,
+    paddingHorizontal: 18,
   },
-  primary: {
-    backgroundColor: theme.accentMuted,
-    borderColor: theme.accent,
+  accountButtonPressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.99 }],
   },
-  buttonText: {
+  accountCopy: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  accountName: {
     color: theme.text,
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  accountSub: {
+    color: theme.accent,
+    fontSize: 13,
+    marginTop: 5,
+  },
+  chevron: {
+    color: theme.textDim,
+    fontSize: 30,
+  },
+  removeButton: {
+    width: 58,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(248, 81, 73, 0.08)",
+    borderColor: "rgba(248, 81, 73, 0.24)",
+    borderWidth: 1,
+  },
+  removeButtonPressed: {
+    opacity: 0.75,
+  },
+  removeText: {
+    color: theme.danger,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  microsoftButton: {
+    marginTop: 10,
   },
   codeCard: {
-    marginTop: 32,
-    padding: 20,
-    backgroundColor: theme.card,
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: 12,
     alignItems: "center",
+    padding: 22,
+  },
+  codeTitle: {
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: "900",
   },
   link: {
     color: theme.myMsg,
     textDecorationLine: "underline",
-    marginTop: 8,
+    marginTop: 16,
     fontSize: 16,
   },
   codeText: {
-    color: theme.accent,
-    fontSize: 32,
+    color: theme.accentSoft,
+    fontSize: 34,
     fontFamily: "Courier",
-    fontWeight: "700",
+    fontWeight: "900",
     letterSpacing: 4,
-    marginVertical: 12,
+    marginTop: 18,
+    marginBottom: 16,
+  },
+  copyButton: {
+    alignSelf: "stretch",
+  },
+  waitRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 18,
+  },
+  waitText: {
+    color: theme.textDim,
+    fontSize: 13,
+    fontWeight: "700",
   },
   error: {
     color: theme.danger,
     marginTop: 24,
     textAlign: "center",
+    fontWeight: "700",
   },
 });

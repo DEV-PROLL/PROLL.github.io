@@ -1,3 +1,4 @@
+import "dotenv/config";
 import fs from "fs";
 import { loadConfig } from "./config";
 import { AuthService } from "./auth";

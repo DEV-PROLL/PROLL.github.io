@@ -2,9 +2,10 @@
 // All messages are JSON over a single WebSocket connection.
 
 export type ClientMessage =
-  | { type: "auth_start" }
-  | { type: "auth_cached"; userId: string }
+  | { type: "auth_start"; mcVersion?: string }
+  | { type: "auth_cached"; userId: string; mcVersion?: string }
   | { type: "send"; text: string }
+  | { type: "complete"; requestId: string; text: string }
   | { type: "logout" }
   | { type: "ping" };
 
@@ -27,20 +28,48 @@ export type ServerMessage =
   | {
       type: "chat";
       from: string | null;
+      fromUuid?: string;
       text: string;
       ts: number;
+      segments?: ChatSegment[];
       rawJson?: unknown;
     }
-  | { type: "system"; text: string; ts: number }
+  | { type: "system"; text: string; ts: number; segments?: ChatSegment[]; rawJson?: unknown }
+  | {
+      type: "completion";
+      requestId: string;
+      text: string;
+      matches: CompletionMatch[];
+    }
   | { type: "kicked"; reason: string }
   | { type: "error"; text: string }
   | { type: "pong" };
+
+export interface CompletionMatch {
+  value: string;
+  tooltip?: string;
+}
+
+export interface ChatSegment {
+  text: string;
+  color?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underlined?: boolean;
+  strikethrough?: boolean;
+  clickEvent?: {
+    action: string;
+    value: string;
+  };
+  hoverText?: string;
+}
 
 export interface BridgeConfig {
   mcHost: string;
   mcPort: number;
   mcVersion: string;
   wsPort: number;
+  bridgeToken: string | null;
   tokensDir: string;
   allowedOrigins: string[] | null;
   maxSessions: number;

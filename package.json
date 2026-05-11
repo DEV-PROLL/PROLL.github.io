@@ -10,7 +10,13 @@
   "scripts": {
     "bridge:dev": "npm run dev -w bridge",
     "bridge:build": "npm run build -w bridge",
-    "mobile:start": "npm run start -w mobile"
+    "bridge:start": "zsh bridge/ops/macmini/run-bridge.zsh",
+    "mobile:start": "npm run start -w mobile",
+    "web:export": "npm run web:export -w mobile"
+  },
+  "overrides": {
+    "react-native": "0.81.5",
+    "@react-native/virtualized-lists": "0.81.5"
   },
   "engines": {
     "node": ">=20"

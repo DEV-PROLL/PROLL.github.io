@@ -5,11 +5,13 @@ import type { BridgeConfig, ClientMessage, ServerMessage } from "./types";
 import { AuthService } from "./auth";
 import type { McSession } from "./mc-session";
 import type { SessionManager } from "./session-manager";
+import { assertSupportedMcVersion } from "./mc-versions";
 
 interface ClientState {
   ws: WebSocket;
   sessionKey: string;          // unique per WS connection
   userId: string | null;       // populated after auth_ok
+  sessionId: string | null;    // user + version key in SessionManager
   mcSession: McSession | null; // populated after auth_ok
   listener: ((msg: ServerMessage) => void) | null;
 }
@@ -32,6 +34,18 @@ export function startWsServer(
   const wss = new WebSocketServer({
     server: httpServer,
     verifyClient: (info, done) => {
+      if (cfg.bridgeToken) {
+        const url = new URL(info.req.url ?? "/", "http://bridge.local");
+        const authHeader = info.req.headers.authorization;
+        const bearerToken =
+          typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+            ? authHeader.slice("Bearer ".length).trim()
+            : null;
+        const queryToken = url.searchParams.get("token");
+        if (queryToken !== cfg.bridgeToken && bearerToken !== cfg.bridgeToken) {
+          return done(false, 401, "invalid bridge token");
+        }
+      }
       if (!cfg.allowedOrigins) return done(true);
       const origin = info.origin ?? "";
       if (cfg.allowedOrigins.includes(origin)) return done(true);
@@ -44,6 +58,7 @@ export function startWsServer(
       ws,
       sessionKey: randomUUID(),
       userId: null,
+      sessionId: null,
       mcSession: null,
       listener: null,
     };
@@ -68,15 +83,15 @@ export function startWsServer(
     });
 
     ws.on("close", () => {
-      if (state.userId && state.listener) {
-        sessions.detach(state.userId, state.listener);
+      if (state.sessionId && state.listener) {
+        sessions.detach(state.sessionId, state.listener);
       }
     });
 
     ws.on("error", () => {
       // Mirror close cleanup; ws will fire 'close' too but be defensive.
-      if (state.userId && state.listener) {
-        sessions.detach(state.userId, state.listener);
+      if (state.sessionId && state.listener) {
+        sessions.detach(state.sessionId, state.listener);
         state.listener = null;
       }
     });
@@ -107,6 +122,14 @@ async function handleMessage(
         send({ type: "error", text: "already authenticated" });
         return;
       }
+      let mcVersion: string;
+      try {
+        mcVersion = resolveMcVersion(msg.mcVersion, cfg);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        send({ type: "auth_failed", reason });
+        return;
+      }
       try {
         const result = await auth.loginWithDeviceCode(state.sessionKey, (code) => {
           send({
@@ -116,7 +139,7 @@ async function handleMessage(
             expiresInSec: code.expires_in,
           });
         });
-        attachToSession(result.userId, result.profilesFolder, state, send, sessions);
+        attachToSession(result, mcVersion, state, send, sessions);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         send({ type: "auth_failed", reason });
@@ -129,12 +152,20 @@ async function handleMessage(
         send({ type: "error", text: "already authenticated" });
         return;
       }
+      let mcVersion: string;
+      try {
+        mcVersion = resolveMcVersion(msg.mcVersion, cfg);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        send({ type: "auth_failed", reason });
+        return;
+      }
       const cached = await auth.loadCached(msg.userId);
       if (!cached) {
         send({ type: "auth_failed", reason: "no cached login for this user" });
         return;
       }
-      attachToSession(cached.userId, cached.profilesFolder, state, send, sessions);
+      attachToSession(cached, mcVersion, state, send, sessions);
       return;
     }
 
@@ -150,13 +181,34 @@ async function handleMessage(
       return;
     }
 
+    case "complete": {
+      if (!state.mcSession) {
+        send({
+          type: "completion",
+          requestId: msg.requestId,
+          text: msg.text,
+          matches: [],
+        });
+        return;
+      }
+      const matches = await state.mcSession.complete(msg.text);
+      send({
+        type: "completion",
+        requestId: msg.requestId,
+        text: msg.text,
+        matches,
+      });
+      return;
+    }
+
     case "logout": {
-      if (state.userId && state.listener) {
-        sessions.detach(state.userId, state.listener);
-        sessions.forceClose(state.userId);
+      if (state.sessionId && state.listener) {
+        sessions.detach(state.sessionId, state.listener);
+        sessions.forceClose(state.sessionId);
         state.listener = null;
         state.mcSession = null;
         state.userId = null;
+        state.sessionId = null;
       }
       return;
     }
@@ -170,20 +222,41 @@ async function handleMessage(
 }
 
 function attachToSession(
-  userId: string,
-  profilesFolder: string,
+  authResult: {
+    userId: string;
+    cacheUserId: string;
+    ign: string;
+    uuid: string;
+    profilesFolder: string;
+  },
+  mcVersion: string,
   state: ClientState,
   send: (m: ServerMessage) => void,
   sessions: SessionManager,
 ): void {
-  const listener = (m: ServerMessage) => send(m);
+  const listener = (m: ServerMessage) => {
+    send(m);
+    if (m.type === "status" && !m.connected) {
+      state.mcSession = null;
+      state.userId = null;
+      state.sessionId = null;
+    }
+  };
   try {
-    const mc = sessions.attach(userId, profilesFolder, listener);
+    const { userId, cacheUserId, ign, uuid, profilesFolder } = authResult;
+    const sessionId = `${userId}@${mcVersion}`;
+    const mc = sessions.attach(userId, cacheUserId, profilesFolder, mcVersion, listener);
     state.userId = userId;
+    state.sessionId = sessionId;
     state.listener = listener;
     state.mcSession = mc;
+    send({ type: "auth_ok", userId, ign, uuid });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     send({ type: "auth_failed", reason });
   }
+}
+
+function resolveMcVersion(requested: string | undefined, cfg: BridgeConfig): string {
+  return assertSupportedMcVersion(requested?.trim() || cfg.mcVersion);
 }

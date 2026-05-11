@@ -18,6 +18,7 @@
 | --- | --- |
 | `MC_HOST` / `MC_PORT` / `MC_VERSION` | 대상 마크 서버 |
 | `WS_PORT` | WebSocket(+HTTP) 포트, `/health` 엔드포인트 동일 포트 |
+| `BRIDGE_TOKEN` | 공개 브릿지에서는 필수. 설정 시 `Authorization: Bearer ...` 또는 `ws://host:port?token=...`로만 접속 허용 |
 | `TOKENS_DIR` | 유저별 토큰 캐시 폴더 (운영 시 영구 볼륨) |
 | `ALLOWED_ORIGINS` | WS Origin 화이트리스트(콤마 구분, 비우면 전체 허용) |
 | `MAX_SESSIONS` | 동시 봇 수 상한 |
@@ -34,7 +35,7 @@ npm run dev
 
 WS 클라이언트로 빠르게 테스트:
 ```bash
-npx wscat -c ws://localhost:8080
+npx wscat -c 'ws://localhost:8080?token=change-this-long-random-token'
 > {"type":"auth_start"}
 < {"type":"auth_code","code":"ABC-DEFGH","verificationUri":"https://www.microsoft.com/link","expiresInSec":900}
 # 브라우저에서 코드 입력 후 잠시 기다리면…
@@ -46,14 +47,18 @@ npx wscat -c ws://localhost:8080
 
 ## 배포
 
-- Fly.io 권장 (영구 볼륨이 토큰 캐시에 적합).
+- 맥미니 + Cloudflare Tunnel 운영 주소: `https://bridge.proit.kr/health`, `wss://bridge.proit.kr?token=<BRIDGE_TOKEN>`.
+- 맥미니 운영은 `bridge/ops/macmini/README.md` 참고.
+- Fly.io 배포도 가능 (영구 볼륨이 토큰 캐시에 적합).
 - `Dockerfile`과 `fly.toml` 동봉.
-- `flyctl secrets set MC_HOST=... MC_PORT=... MC_VERSION=... ALLOWED_ORIGINS=...`
+- `flyctl secrets set MC_HOST=... MC_PORT=... MC_VERSION=... BRIDGE_TOKEN=... ALLOWED_ORIGINS=...`
 - `flyctl volumes create bridge_tokens --size 1`
 - `fly.toml`의 `[mounts]`가 볼륨을 `/data`에 마운트, `TOKENS_DIR=/data/tokens` 사용.
 
 ## 보안 메모
 
 - 토큰은 절대 git/로그에 노출되지 않음. `.gitignore`에 `bridge/tokens/` 포함.
+- `BRIDGE_TOKEN`을 설정하면 캐시된 IGN만 알고 세션에 붙는 공격을 막을 수 있음.
 - `ALLOWED_ORIGINS`로 우리 앱 외 접근 차단 권장.
 - `CHAT_RATE_LIMIT`과 `MAX_SESSIONS`로 악용 방지.
+- PWA에 query token을 넣는 방식은 배포가 단순하지만 번들에서 추출 가능하다. 운영 보안을 더 올릴 때는 짧은 수명의 사용자별 앱 토큰 발급 계층을 추가한다.

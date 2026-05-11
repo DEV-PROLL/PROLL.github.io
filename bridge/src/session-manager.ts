@@ -20,10 +20,13 @@ export class SessionManager {
   // pending it is cancelled.
   attach(
     userId: string,
+    cacheUserId: string,
     profilesFolder: string,
+    mcVersion: string,
     onMessage: (msg: ServerMessage) => void,
   ): McSession {
-    let entry = this.sessions.get(userId);
+    const sessionId = `${userId}@${mcVersion}`;
+    let entry = this.sessions.get(sessionId);
     if (!entry) {
       if (this.sessions.size >= this.cfg.maxSessions) {
         throw new Error(
@@ -33,17 +36,17 @@ export class SessionManager {
       const session = new McSession({
         host: this.cfg.mcHost,
         port: this.cfg.mcPort,
-        version: this.cfg.mcVersion,
-        username: userId,
+        version: mcVersion,
+        username: cacheUserId,
         profilesFolder,
       });
       entry = { session, refCount: 0, graceTimer: null };
-      this.sessions.set(userId, entry);
+      this.sessions.set(sessionId, entry);
       session.start();
       session.on("ended", () => {
         // Bot disconnected. Drop the entry so a future attach() rebuilds it.
-        const cur = this.sessions.get(userId);
-        if (cur === entry) this.sessions.delete(userId);
+        const cur = this.sessions.get(sessionId);
+        if (cur === entry) this.sessions.delete(sessionId);
       });
     }
     if (entry.graceTimer) {
@@ -56,12 +59,14 @@ export class SessionManager {
     for (const m of entry.session.history50()) {
       onMessage(m);
     }
+    const status = entry.session.statusSnapshot();
+    if (status) onMessage(status);
     entry.session.on("message", onMessage);
     return entry.session;
   }
 
-  detach(userId: string, listener: (msg: ServerMessage) => void): void {
-    const entry = this.sessions.get(userId);
+  detach(sessionId: string, listener: (msg: ServerMessage) => void): void {
+    const entry = this.sessions.get(sessionId);
     if (!entry) return;
     entry.session.off("message", listener);
     entry.refCount = Math.max(0, entry.refCount - 1);
@@ -70,21 +75,21 @@ export class SessionManager {
       // just briefly losing network (background, lock screen, etc.).
       entry.graceTimer = setTimeout(() => {
         entry.session.shutdown("client disconnected");
-        this.sessions.delete(userId);
+        this.sessions.delete(sessionId);
       }, GRACE_MS);
     }
   }
 
   // Force shutdown — used by /logout from the client.
-  forceClose(userId: string): void {
-    const entry = this.sessions.get(userId);
+  forceClose(sessionId: string): void {
+    const entry = this.sessions.get(sessionId);
     if (!entry) return;
     if (entry.graceTimer) {
       clearTimeout(entry.graceTimer);
       entry.graceTimer = null;
     }
     entry.session.shutdown("logout");
-    this.sessions.delete(userId);
+    this.sessions.delete(sessionId);
   }
 
   shutdownAll(reason: string): void {

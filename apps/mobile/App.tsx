@@ -5,16 +5,31 @@ import { LoginScreen } from "./src/screens/LoginScreen";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import {
   getBridgeUrl,
-  getCachedUserId,
   clearBridgeUrl,
-  clearCachedUserId,
+  getMcVersion,
+  getServerAddress,
 } from "./src/store/settings";
+import { DEFAULT_MC_VERSION } from "./src/mcVersions";
+import { DEFAULT_SERVER_ADDRESS } from "./src/appConfig";
 
 type Phase =
   | { name: "loading" }
   | { name: "server" }
-  | { name: "login"; bridgeUrl: string }
-  | { name: "chat"; bridgeUrl: string; ign: string; userId: string };
+  | {
+      name: "login";
+      bridgeUrl: string;
+      mcVersion: string;
+      serverAddress: string;
+    }
+  | {
+      name: "chat";
+      bridgeUrl: string;
+      mcVersion: string;
+      serverAddress: string;
+      ign: string;
+      userId: string;
+      uuid?: string;
+    };
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>({ name: "loading" });
@@ -22,18 +37,13 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       const url = await getBridgeUrl();
+      const mcVersion = (await getMcVersion()) ?? DEFAULT_MC_VERSION;
+      const serverAddress = (await getServerAddress()) ?? DEFAULT_SERVER_ADDRESS;
       if (!url) {
         setPhase({ name: "server" });
         return;
       }
-      const cachedUserId = await getCachedUserId();
-      if (cachedUserId) {
-        // We don't auto-jump into chat — the LoginScreen will offer
-        // a "Continue as <ign>" button that re-auths via cached tokens.
-        setPhase({ name: "login", bridgeUrl: url });
-      } else {
-        setPhase({ name: "login", bridgeUrl: url });
-      }
+      setPhase({ name: "login", bridgeUrl: url, mcVersion, serverAddress });
     })();
   }, []);
 
@@ -44,24 +54,30 @@ export default function App() {
 
       {phase.name === "server" && (
         <ServersScreen
-          onContinue={(bridgeUrl) => setPhase({ name: "login", bridgeUrl })}
+          onContinue={(bridgeUrl, mcVersion, serverAddress) =>
+            setPhase({ name: "login", bridgeUrl, mcVersion, serverAddress })
+          }
         />
       )}
 
       {phase.name === "login" && (
         <LoginScreen
           bridgeUrl={phase.bridgeUrl}
-          onAuthenticated={({ ign, userId }) =>
+          mcVersion={phase.mcVersion}
+          serverAddress={phase.serverAddress}
+          onAuthenticated={({ ign, userId, uuid }) =>
             setPhase({
               name: "chat",
               bridgeUrl: phase.bridgeUrl,
+              mcVersion: phase.mcVersion,
+              serverAddress: phase.serverAddress,
               ign,
               userId,
+              uuid,
             })
           }
           onChangeServer={async () => {
             await clearBridgeUrl();
-            await clearCachedUserId();
             setPhase({ name: "server" });
           }}
         />
@@ -70,10 +86,18 @@ export default function App() {
       {phase.name === "chat" && (
         <ChatScreen
           bridgeUrl={phase.bridgeUrl}
+          mcVersion={phase.mcVersion}
+          serverAddress={phase.serverAddress}
           ign={phase.ign}
           userId={phase.userId}
+          uuid={phase.uuid}
           onLogout={() =>
-            setPhase({ name: "login", bridgeUrl: phase.bridgeUrl })
+            setPhase({
+              name: "login",
+              bridgeUrl: phase.bridgeUrl,
+              mcVersion: phase.mcVersion,
+              serverAddress: phase.serverAddress,
+            })
           }
         />
       )}
