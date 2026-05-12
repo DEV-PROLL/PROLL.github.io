@@ -61,6 +61,9 @@ export class McSession extends EventEmitter {
 
   start(): void {
     if (this.bot) return;
+    console.info(
+      `[mc-session] starting ${this.opts.host}:${this.opts.port} mc=${this.opts.version}`,
+    );
     const bot = mineflayer.createBot({
       host: this.opts.host,
       port: this.opts.port,
@@ -108,6 +111,7 @@ export class McSession extends EventEmitter {
     bot.once("spawn", () => {
       const ign = bot.username;
       const uuid = (bot as unknown as { uuid?: string }).uuid ?? "";
+      console.info(`[mc-session] spawned ign=${ign} mc=${this.opts.version}`);
       this.emitMsg({ type: "auth_ok", userId: ign, ign, uuid });
       this.markConnected();
       this.startAntiAfk();
@@ -148,13 +152,17 @@ export class McSession extends EventEmitter {
     );
 
     bot.on("kicked", (reason: unknown) => {
+      const normalized = normalizeKickReason(reason);
+      console.warn(`[mc-session] kicked reason=${normalized}`);
       this.emitMsg({
         type: "kicked",
-        reason: normalizeKickReason(reason),
+        reason: normalized,
       });
     });
 
     bot.on("end", (reason: string) => {
+      const normalizedReason = reason || "ended";
+      console.warn(`[mc-session] ended reason=${normalizedReason}`);
       this.stopAntiAfk();
       this.detachGuiWindow();
       this.connected = false;
@@ -162,6 +170,7 @@ export class McSession extends EventEmitter {
         type: "status",
         connected: false,
         server: `${this.opts.host}:${this.opts.port}`,
+        reason: normalizedReason,
       });
       this.emit("ended", reason);
       this.bot = null;
@@ -501,8 +510,21 @@ function serializeWindow(window: Window): GuiWindow {
 
 function serializeItem(item: Item | null | undefined): GuiItem | null {
   if (!item) return null;
-  const displayName = componentPlainText(item.customName) || item.displayName;
-  const lore = serializeItemLore(item.customLore);
+  const displayName =
+    componentPlainText(item.customName) ||
+    componentPlainText(readItemComponent(item, [
+      "minecraft:custom_name",
+      "custom_name",
+      "customName",
+      "Name",
+    ])) ||
+    componentPlainText(readItemNbtDisplayField(item, "Name")) ||
+    item.displayName;
+  const lore = firstNonEmptyLore([
+    item.customLore,
+    readItemComponent(item, ["minecraft:lore", "lore", "Lore", "customLore"]),
+    readItemNbtDisplayField(item, "Lore"),
+  ]);
   return {
     name: item.name,
     displayName,
@@ -513,13 +535,112 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
   };
 }
 
-function serializeItemLore(lore: Item["customLore"]): string[] {
-  const lines = Array.isArray(lore) ? lore : typeof lore === "string" ? [lore] : [];
+function firstNonEmptyLore(candidates: unknown[]): string[] {
+  for (const candidate of candidates) {
+    const lore = serializeItemLore(candidate);
+    if (lore.length > 0) return lore;
+  }
+  return [];
+}
+
+function serializeItemLore(lore: unknown): string[] {
+  const normalized = unwrapNbtValue(lore);
+  const lines = extractLoreLines(normalized);
   return lines
     .flatMap((line) => componentPlainText(line).split(/\r?\n/))
     .map((line) => line.trim())
     .filter(Boolean)
     .slice(0, 16);
+}
+
+function extractLoreLines(value: unknown): unknown[] {
+  const normalized = unwrapNbtValue(value);
+  if (Array.isArray(normalized)) return normalized;
+  if (typeof normalized === "string") return [normalized];
+  if (!normalized || typeof normalized !== "object") return [];
+
+  const obj = normalized as Record<string, unknown>;
+  for (const key of ["lines", "lore", "Lore", "value"]) {
+    const nested = extractLoreLines(obj[key]);
+    if (nested.length > 0) return nested;
+  }
+  return [];
+}
+
+function readItemComponent(item: Item, keys: string[]): unknown {
+  const sources = componentSources(item);
+  for (const source of sources) {
+    const value = readComponentSource(source, keys);
+    if (value != null) return value;
+  }
+  return undefined;
+}
+
+function componentSources(item: Item): unknown[] {
+  const obj = item as unknown as Record<string, unknown>;
+  return [
+    obj.components,
+    obj.componentMap,
+    obj.rawComponents,
+    obj.nbt,
+    obj.nbt && typeof obj.nbt === "object"
+      ? (obj.nbt as Record<string, unknown>).components
+      : undefined,
+  ].filter((source) => source != null);
+}
+
+function readComponentSource(source: unknown, keys: string[]): unknown {
+  const normalized = unwrapNbtValue(source);
+  if (!normalized) return undefined;
+
+  if (normalized instanceof Map) {
+    for (const key of keys) {
+      if (normalized.has(key)) return normalized.get(key);
+    }
+    return undefined;
+  }
+
+  if (Array.isArray(normalized)) {
+    for (const entry of normalized) {
+      const obj = unwrapNbtValue(entry);
+      if (!obj || typeof obj !== "object") continue;
+      const record = obj as Record<string, unknown>;
+      const entryKey = record.type ?? record.name ?? record.key;
+      if (typeof entryKey === "string" && keys.includes(entryKey)) {
+        return record.value ?? record.data ?? record;
+      }
+    }
+    return undefined;
+  }
+
+  if (typeof normalized === "object") {
+    const record = normalized as Record<string, unknown>;
+    for (const key of keys) {
+      if (record[key] != null) return record[key];
+    }
+  }
+
+  return undefined;
+}
+
+function readItemNbtDisplayField(item: Item, field: "Name" | "Lore"): unknown {
+  const obj = item as unknown as { nbt?: unknown };
+  const root = unwrapNbtValue(obj.nbt);
+  if (!root || typeof root !== "object") return undefined;
+  const display = unwrapNbtValue((root as Record<string, unknown>).display);
+  if (!display || typeof display !== "object") return undefined;
+  return (display as Record<string, unknown>)[field];
+}
+
+function unwrapNbtValue(value: unknown): unknown {
+  let current = value;
+  for (let i = 0; i < 6; i += 1) {
+    if (!current || typeof current !== "object") return current;
+    const obj = current as Record<string, unknown>;
+    if (!("value" in obj)) return current;
+    current = obj.value;
+  }
+  return current;
 }
 
 function normalizeWindowTitle(title: unknown): string {

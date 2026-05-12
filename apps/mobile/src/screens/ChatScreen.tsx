@@ -50,6 +50,7 @@ interface DisplayedMessage {
 let messageCounter = 0;
 const newId = () => `m-${++messageCounter}-${Date.now()}`;
 const MAX_INPUT_HISTORY = 50;
+const MAX_AUTO_RECONNECTS = 6;
 
 export function ChatScreen({
   bridgeUrl,
@@ -70,6 +71,7 @@ export function ChatScreen({
     online?: number;
     connected: boolean;
     phase: "joining" | "online" | "offline" | "kicked";
+    reason?: string;
   }>({ connected: false, phase: "joining" });
   const [activeWindow, setActiveWindow] = useState<GuiWindow | null>(null);
   const [selectedWindowSlot, setSelectedWindowSlot] = useState<number | null>(null);
@@ -79,6 +81,9 @@ export function ChatScreen({
   const latestInputRef = useRef(input);
   const textInputRef = useRef<TextInput>(null);
   const historyDraftRef = useRef("");
+  const autoReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoReconnectAttemptRef = useRef(0);
+  const lastAuthAttemptAtRef = useRef(0);
 
   useEffect(() => {
     latestInputRef.current = input;
@@ -90,6 +95,13 @@ export function ChatScreen({
     });
     setTimeout(() => listRef.current?.scrollToEnd({ animated }), 80);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 260);
+  }, []);
+
+  const clearAutoReconnectTimer = useCallback(() => {
+    if (autoReconnectTimerRef.current) {
+      clearTimeout(autoReconnectTimerRef.current);
+      autoReconnectTimerRef.current = null;
+    }
   }, []);
 
   const handleMessage = useCallback(
@@ -127,11 +139,27 @@ export function ChatScreen({
             setSelectedWindowSlot(null);
             setPendingSlot(null);
           }
-          setServerInfo({
-            server: msg.server,
-            online: msg.playersOnline,
-            connected: msg.connected,
-            phase: msg.connected ? "online" : "offline",
+          if (msg.connected) {
+            autoReconnectAttemptRef.current = 0;
+            clearAutoReconnectTimer();
+          }
+          setServerInfo((prev) => {
+            if (msg.connected) {
+              return {
+                server: msg.server,
+                online: msg.playersOnline,
+                connected: true,
+                phase: "online",
+                reason: undefined,
+              };
+            }
+            return {
+              server: msg.server,
+              online: msg.playersOnline ?? prev.online,
+              connected: false,
+              phase: prev.phase === "kicked" ? "kicked" : "offline",
+              reason: msg.reason ?? prev.reason,
+            };
           });
           break;
         case "completion":
@@ -162,10 +190,12 @@ export function ChatScreen({
           setPendingSlot(null);
           break;
         case "kicked":
+          clearAutoReconnectTimer();
           setServerInfo((prev) => ({
             ...prev,
             connected: false,
             phase: "kicked",
+            reason: msg.reason,
           }));
           setActiveWindow(null);
           setSelectedWindowSlot(null);
@@ -181,6 +211,7 @@ export function ChatScreen({
           ]);
           break;
         case "error":
+          setPendingSlot(null);
           setMessages((prev) => [
             ...prev,
             {
@@ -206,14 +237,47 @@ export function ChatScreen({
           break;
       }
     },
-    [onLogout, userId],
+    [clearAutoReconnectTimer, onLogout, userId],
   );
 
   const { state, send } = useBridge(bridgeUrl, true, handleMessage);
 
+  const reconnect = useCallback(
+    (manual = false) => {
+      if (state !== "open") return false;
+      const now = Date.now();
+      if (!manual && now - lastAuthAttemptAtRef.current < 1200) return false;
+      clearAutoReconnectTimer();
+      if (manual) autoReconnectAttemptRef.current = 0;
+      lastAuthAttemptAtRef.current = now;
+      setActiveWindow(null);
+      setSelectedWindowSlot(null);
+      setPendingSlot(null);
+      setServerInfo((prev) => ({
+        ...prev,
+        connected: false,
+        phase: "joining",
+        reason: manual ? undefined : prev.reason,
+      }));
+      const ok = send({ type: "auth_cached", userId, mcVersion });
+      if (!ok) {
+        setServerInfo((prev) => ({
+          ...prev,
+          connected: false,
+          phase: "offline",
+          reason: "bridge socket is not ready",
+        }));
+      }
+      return ok;
+    },
+    [clearAutoReconnectTimer, mcVersion, send, state, userId],
+  );
+
   useEffect(() => {
     scrollToBottom(true);
   }, [messages.length, completionMatches.length, scrollToBottom]);
+
+  useEffect(() => () => clearAutoReconnectTimer(), [clearAutoReconnectTimer]);
 
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", () => scrollToBottom(false));
@@ -261,21 +325,25 @@ export function ChatScreen({
     };
   }, [input, send, serverInfo.connected, state]);
 
-  const reconnect = () => {
-    setServerInfo((prev) => ({
-      ...prev,
-      connected: false,
-      phase: "joining",
-    }));
-    send({ type: "auth_cached", userId, mcVersion });
-  };
-
   // Re-authenticate as soon as the socket opens (covers reconnects).
   useEffect(() => {
     if (state === "open") {
       reconnect();
     }
-  }, [state, send, userId, mcVersion]);
+  }, [state, reconnect]);
+
+  useEffect(() => {
+    if (state !== "open" || serverInfo.connected || serverInfo.phase === "joining") return;
+    if (autoReconnectTimerRef.current) return;
+    if (autoReconnectAttemptRef.current >= MAX_AUTO_RECONNECTS) return;
+    const attempt = autoReconnectAttemptRef.current + 1;
+    const delay = Math.min(1500 * 2 ** (attempt - 1), 15_000);
+    autoReconnectTimerRef.current = setTimeout(() => {
+      autoReconnectTimerRef.current = null;
+      autoReconnectAttemptRef.current = attempt;
+      reconnect(false);
+    }, delay);
+  }, [reconnect, serverInfo.connected, serverInfo.phase, state]);
 
   const handleSend = () => {
     const text = input.trim();
@@ -456,9 +524,9 @@ export function ChatScreen({
         {state === "open" && !serverInfo.connected && serverInfo.phase !== "joining" && (
           <View style={styles.reconnectBanner}>
             <Text style={styles.reconnectBannerText}>
-              {serverInfo.phase === "kicked" ? "서버에서 연결이 끊겼습니다." : "서버 연결이 끊겼습니다."}
+              {disconnectCopy(serverInfo.phase, autoReconnectAttemptRef.current)}
             </Text>
-            <Pressable style={styles.reconnectBtn} onPress={reconnect}>
+            <Pressable style={styles.reconnectBtn} onPress={() => reconnect(true)}>
               <Text style={styles.reconnectText}>재접속</Text>
             </Pressable>
           </View>
@@ -549,12 +617,12 @@ export function ChatScreen({
           <Pressable
             style={({ pressed }) => [
               styles.sendBtn,
-              pressed && serverInfo.connected ? styles.sendBtnPressed : null,
+              pressed ? styles.sendBtnPressed : null,
               !serverInfo.connected && styles.sendBtnDisabled,
             ]}
-            onPress={handleSend}
+            onPress={serverInfo.connected ? handleSend : () => reconnect(true)}
           >
-            <Text style={styles.sendText}>전송</Text>
+            <Text style={styles.sendText}>{serverInfo.connected ? "전송" : "재접속"}</Text>
           </Pressable>
         </View>
 
@@ -722,6 +790,21 @@ function ConnectionPill({
     tone = "warning";
   }
   return <StatusPill label={label} tone={tone} style={styles.pill} />;
+}
+
+function disconnectCopy(
+  phase: "joining" | "online" | "offline" | "kicked",
+  attempts: number,
+): string {
+  const suffix =
+    attempts > 0 && attempts < MAX_AUTO_RECONNECTS
+      ? ` 자동 재접속 ${attempts}/${MAX_AUTO_RECONNECTS}`
+      : "";
+  if (attempts >= MAX_AUTO_RECONNECTS) {
+    return "자동 재접속을 멈췄습니다. 직접 재접속해 주세요.";
+  }
+  if (phase === "kicked") return `서버에서 연결이 끊겼습니다.${suffix}`;
+  return `서버 연결이 끊겼습니다.${suffix}`;
 }
 
 function GuiWindowModal({
@@ -938,7 +1021,7 @@ const styles = StyleSheet.create({
   chatShell: {
     flex: 1,
     width: "100%",
-    maxWidth: 900,
+    maxWidth: 780,
     backgroundColor: theme.bg,
     borderLeftColor: theme.glassBorder,
     borderLeftWidth: 1,

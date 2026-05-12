@@ -97,7 +97,7 @@ export function ServersScreen({ onContinue }: Props) {
     void poll();
     timer = setInterval(() => {
       void poll();
-    }, 15_000);
+    }, 5_000);
 
     return () => {
       cancelled = true;

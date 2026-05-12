@@ -189,7 +189,7 @@ async function getServerStatus(
   cache.promise = pingMinecraftServer(cfg)
     .then((status) => {
       cache.value = status;
-      cache.expiresAt = Date.now() + (status.ok ? 10_000 : 3_000);
+      cache.expiresAt = Date.now() + (status.ok ? 5_000 : 2_000);
       return status;
     })
     .finally(() => {
@@ -291,10 +291,6 @@ async function handleMessage(
     }
 
     case "auth_cached": {
-      if (state.userId) {
-        send({ type: "error", text: "already authenticated" });
-        return;
-      }
       let mcVersion: string;
       try {
         mcVersion = resolveMcVersion(msg.mcVersion, cfg);
@@ -402,12 +398,15 @@ function attachToSession(
   send: (m: ServerMessage) => void,
   sessions: SessionManager,
 ): void {
+  detachClientSession(state, sessions);
+
   const listener = (m: ServerMessage) => {
     send(m);
     if (m.type === "status" && !m.connected) {
       state.mcSession = null;
       state.userId = null;
-      state.sessionId = null;
+      // Keep sessionId/listener until the next attach or WS close so the
+      // listener can be detached cleanly even after a bot-side disconnect.
     }
   };
   try {
@@ -423,6 +422,15 @@ function attachToSession(
     const reason = err instanceof Error ? err.message : String(err);
     send({ type: "auth_failed", reason });
   }
+}
+
+function detachClientSession(state: ClientState, sessions: SessionManager): void {
+  if (!state.sessionId || !state.listener) return;
+  sessions.detach(state.sessionId, state.listener);
+  state.listener = null;
+  state.mcSession = null;
+  state.userId = null;
+  state.sessionId = null;
 }
 
 function resolveMcVersion(requested: string | undefined, cfg: BridgeConfig): string {

@@ -26,6 +26,7 @@ export type ServerMessage =
       server: string;
       ign?: string;
       playersOnline?: number;
+      reason?: string;
     }
   | {
       type: "chat";
