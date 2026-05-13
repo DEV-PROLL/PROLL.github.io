@@ -141,5 +141,14 @@ export function normalizeAuthError(err: unknown): Error {
     return new Error("이 Microsoft 계정에 Minecraft Java Edition 프로필이 없습니다.");
   }
 
+  if (
+    lower.includes("failed to obtain profile data") ||
+    lower.includes("does the account own minecraft")
+  ) {
+    return new Error(
+      "이 Microsoft 계정에서 Minecraft Java Edition 프로필을 가져오지 못했습니다. Java Edition을 보유한 계정으로 다시 로그인하세요.",
+    );
+  }
+
   return err instanceof Error ? err : new Error(raw);
 }

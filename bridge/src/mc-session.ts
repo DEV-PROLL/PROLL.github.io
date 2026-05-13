@@ -182,7 +182,7 @@ export class McSession extends EventEmitter {
           type: "auth_failed",
           reason: normalizeAuthError(err).message,
         });
-        if (!this.connected) this.finishDisconnected(reason);
+        this.finishDisconnected(reason);
         return;
       }
       this.emitMsg({ type: "error", text: reason });
@@ -786,7 +786,9 @@ function isMicrosoftAuthError(err: Error): boolean {
     message.includes("invalid_grant") ||
     message.includes("post_request_failed") ||
     message.includes("expired_token") ||
-    message.includes("authorization_declined")
+    message.includes("authorization_declined") ||
+    message.includes("failed to obtain profile data") ||
+    message.includes("does the account own minecraft")
   );
 }
 
