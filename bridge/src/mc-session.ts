@@ -56,6 +56,8 @@ export class McSession extends EventEmitter {
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
   private configurationRestartTimer: NodeJS.Timeout | null = null;
+  private packetActivityTimer: NodeJS.Timeout | null = null;
+  private lastInboundPacketAt = 0;
 
   constructor(private readonly opts: McSessionOptions) {
     super();
@@ -64,6 +66,7 @@ export class McSession extends EventEmitter {
   start(): void {
     if (this.bot) return;
     this.ended = false;
+    this.lastInboundPacketAt = Date.now();
     console.info(
       `[mc-session] starting ${this.opts.host}:${this.opts.port} mc=${this.opts.version}`,
     );
@@ -92,6 +95,7 @@ export class McSession extends EventEmitter {
     this.patchClientSettingsWrite(bot);
     this.wireEvents(bot);
     this.wireProtocolCompat(bot);
+    this.startPacketActivityWatchdog();
   }
 
   private patchClientSettingsWrite(bot: Bot): void {
@@ -205,6 +209,10 @@ export class McSession extends EventEmitter {
       write(name: string, params: Record<string, unknown>): void;
       state?: string;
     };
+
+    client.on("packet", () => {
+      this.lastInboundPacketAt = Date.now();
+    });
 
     client.on("start_configuration", () => {
       this.emitMsg({
@@ -399,6 +407,7 @@ export class McSession extends EventEmitter {
     this.shuttingDown = true;
     this.stopAntiAfk();
     this.clearConfigurationRestartWatchdog();
+    this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
     const bot = this.bot;
     this.bot = null;
@@ -418,6 +427,7 @@ export class McSession extends EventEmitter {
     console.warn(`[mc-session] ended reason=${normalizedReason}`);
     this.stopAntiAfk();
     this.clearConfigurationRestartWatchdog();
+    this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
     this.connected = false;
     const bot = this.bot;
@@ -505,13 +515,29 @@ export class McSession extends EventEmitter {
       this.configurationRestartTimer = null;
       if (!this.bot || client.state !== "configuration") return;
       this.finishDisconnected("configuration restart did not finish");
-    }, 15_000);
+    }, 45_000);
   }
 
   private clearConfigurationRestartWatchdog(): void {
     if (!this.configurationRestartTimer) return;
     clearTimeout(this.configurationRestartTimer);
     this.configurationRestartTimer = null;
+  }
+
+  private startPacketActivityWatchdog(): void {
+    this.stopPacketActivityWatchdog();
+    this.packetActivityTimer = setInterval(() => {
+      if (!this.bot || this.shuttingDown) return;
+      const idleMs = Date.now() - this.lastInboundPacketAt;
+      if (idleMs < 90_000) return;
+      this.finishDisconnected(`server stopped sending packets for ${idleMs}ms`);
+    }, 30_000);
+  }
+
+  private stopPacketActivityWatchdog(): void {
+    if (!this.packetActivityTimer) return;
+    clearInterval(this.packetActivityTimer);
+    this.packetActivityTimer = null;
   }
 }
 
