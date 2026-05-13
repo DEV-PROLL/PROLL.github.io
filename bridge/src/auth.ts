@@ -95,7 +95,12 @@ export class AuthService {
   // refresh here — mineflayer/prismarine-auth will do that when it boots
   // the bot.
   async loadCached(userId: string): Promise<AuthResult | null> {
-    const folder = path.join(this.tokensRoot, userId);
+    let folder: string;
+    try {
+      folder = this.accountFolder(userId);
+    } catch {
+      return null;
+    }
     let meta: { cacheUserId?: string; ign?: string; uuid?: string };
     try {
       const entries = await fs.readdir(folder);
@@ -116,6 +121,23 @@ export class AuthService {
       uuid: meta.uuid ?? "",
       profilesFolder: folder,
     };
+  }
+
+  async removeCached(userId: string): Promise<void> {
+    await fs.rm(this.accountFolder(userId), { recursive: true, force: true });
+  }
+
+  private accountFolder(userId: string): string {
+    const normalized = userId.trim();
+    if (
+      !normalized ||
+      normalized.includes("/") ||
+      normalized.includes("\\") ||
+      normalized.includes("..")
+    ) {
+      throw new Error("invalid cached account id");
+    }
+    return path.join(this.tokensRoot, normalized);
   }
 }
 

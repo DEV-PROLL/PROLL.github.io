@@ -8,6 +8,7 @@ export type ClientMessage =
   | { type: "complete"; requestId: string; text: string }
   | { type: "window_click"; slot: number; mouseButton?: 0 | 1 }
   | { type: "window_close" }
+  | { type: "forget_account"; userId: string }
   | { type: "logout" }
   | { type: "ping" };
 

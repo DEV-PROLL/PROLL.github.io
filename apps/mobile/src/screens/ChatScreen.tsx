@@ -232,15 +232,38 @@ export function ChatScreen({
           ]);
           break;
         case "auth_failed":
-          void removeSavedAccount(userId);
-          Alert.alert("다시 로그인 필요", msg.reason, [
+          setActiveWindow(null);
+          setSelectedWindowSlot(null);
+          setPendingSlot(null);
+          setServerInfo((prev) => ({
+            ...prev,
+            connected: false,
+            phase: "offline",
+            reason: msg.reason,
+          }));
+          setMessages((prev) => [
+            ...prev,
             {
-              text: "OK",
-              onPress: () => {
-                onLogout();
-              },
+              id: newId(),
+              kind: "error",
+              text: msg.reason,
+              ts: Date.now(),
             },
           ]);
+          void removeSavedAccount(userId).finally(() => {
+            if (Platform.OS === "web") {
+              onLogout();
+              return;
+            }
+            Alert.alert("다시 로그인 필요", msg.reason, [
+              {
+                text: "OK",
+                onPress: () => {
+                  onLogout();
+                },
+              },
+            ]);
+          });
           break;
         default:
           break;

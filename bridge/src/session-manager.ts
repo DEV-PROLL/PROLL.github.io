@@ -93,6 +93,18 @@ export class SessionManager {
     this.sessions.delete(sessionId);
   }
 
+  forceCloseUser(userId: string): void {
+    for (const [sessionId, entry] of this.sessions) {
+      if (!sessionId.startsWith(`${userId}@`)) continue;
+      if (entry.graceTimer) {
+        clearTimeout(entry.graceTimer);
+        entry.graceTimer = null;
+      }
+      entry.session.shutdown("account forgotten");
+      this.sessions.delete(sessionId);
+    }
+  }
+
   shutdownAll(reason: string): void {
     for (const [, entry] of this.sessions) {
       if (entry.graceTimer) clearTimeout(entry.graceTimer);

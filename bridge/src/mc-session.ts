@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import fs from "fs/promises";
 import mineflayer from "mineflayer";
 import type { Bot } from "mineflayer";
 import type { Item } from "prismarine-item";
@@ -178,6 +179,7 @@ export class McSession extends EventEmitter {
       const reason = normalizeRuntimeError(err);
       console.error(`[mc-session] bot error reason=${reason}`, err);
       if (isMicrosoftAuthError(err)) {
+        void this.removeCachedProfileFolder();
         this.emitMsg({
           type: "auth_failed",
           reason: normalizeAuthError(err).message,
@@ -538,6 +540,14 @@ export class McSession extends EventEmitter {
     if (!this.packetActivityTimer) return;
     clearInterval(this.packetActivityTimer);
     this.packetActivityTimer = null;
+  }
+
+  private async removeCachedProfileFolder(): Promise<void> {
+    try {
+      await fs.rm(this.opts.profilesFolder, { recursive: true, force: true });
+    } catch (err) {
+      console.error("[mc-session] failed to remove cached profile folder", err);
+    }
   }
 }
 

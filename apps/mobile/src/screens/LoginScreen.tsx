@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -107,7 +108,21 @@ export function LoginScreen({
     send({ type: "auth_cached", userId: account.userId, mcVersion });
   };
 
+  const forgetAccount = async (account: SavedAccount) => {
+    send({ type: "forget_account", userId: account.userId });
+    const next = await removeSavedAccount(account.userId);
+    setAccounts(next);
+  };
+
   const removeAccount = (account: SavedAccount) => {
+    if (Platform.OS === "web") {
+      const ok =
+        typeof globalThis.confirm !== "function" ||
+        globalThis.confirm(`${account.ign} 계정을 이 기기 목록에서 삭제할까요?`);
+      if (ok) void forgetAccount(account);
+      return;
+    }
+
     Alert.alert(
       "계정 삭제",
       `${account.ign} 계정을 이 기기 목록에서 삭제할까요?`,
@@ -117,7 +132,7 @@ export function LoginScreen({
           text: "삭제",
           style: "destructive",
           onPress: () => {
-            void removeSavedAccount(account.userId).then(setAccounts);
+            void forgetAccount(account);
           },
         },
       ],

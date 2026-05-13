@@ -116,12 +116,21 @@ export async function saveAccount(account: {
 }
 
 export async function removeSavedAccount(userId: string): Promise<SavedAccount[]> {
-  const next = (await getSavedAccounts()).filter(
-    (account) => account.userId !== userId,
+  const accounts = await getSavedAccounts();
+  const removed = accounts.filter(
+    (account) => account.userId === userId || account.ign === userId,
+  );
+  const next = accounts.filter(
+    (account) => account.userId !== userId && account.ign !== userId,
   );
   await setSavedAccounts(next);
   const currentUserId = await getCachedUserId();
-  if (currentUserId === userId) {
+  if (
+    currentUserId === userId ||
+    removed.some(
+      (account) => account.userId === currentUserId || account.ign === currentUserId,
+    )
+  ) {
     await clearCachedUserId();
   }
   return next;

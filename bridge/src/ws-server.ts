@@ -365,6 +365,29 @@ async function handleMessage(
       return;
     }
 
+    case "forget_account": {
+      const userId = msg.userId.trim();
+      if (!userId) {
+        send({ type: "error", text: "invalid account id" });
+        return;
+      }
+      if (state.sessionId && state.listener) {
+        sessions.detach(state.sessionId, state.listener);
+        state.listener = null;
+        state.mcSession = null;
+        state.userId = null;
+        state.sessionId = null;
+      }
+      sessions.forceCloseUser(userId);
+      try {
+        await auth.removeCached(userId);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        send({ type: "error", text: reason });
+      }
+      return;
+    }
+
     case "logout": {
       if (state.sessionId && state.listener) {
         sessions.detach(state.sessionId, state.listener);
