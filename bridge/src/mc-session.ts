@@ -55,6 +55,7 @@ export class McSession extends EventEmitter {
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
+  private configurationRestartTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly opts: McSessionOptions) {
     super();
@@ -211,7 +212,12 @@ export class McSession extends EventEmitter {
         text: "Server requested configuration restart.",
         ts: Date.now(),
       });
+      this.armConfigurationRestartWatchdog(client);
       this.writeConfigurationSettingsWhenReady(client);
+    });
+
+    client.on("finish_configuration", () => {
+      this.clearConfigurationRestartWatchdog();
     });
 
     client.on("store_cookie", (packet: { key?: string; value?: Buffer }) => {
@@ -392,6 +398,7 @@ export class McSession extends EventEmitter {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     this.stopAntiAfk();
+    this.clearConfigurationRestartWatchdog();
     this.detachGuiWindow();
     const bot = this.bot;
     this.bot = null;
@@ -410,6 +417,7 @@ export class McSession extends EventEmitter {
     const normalizedReason = reason || "ended";
     console.warn(`[mc-session] ended reason=${normalizedReason}`);
     this.stopAntiAfk();
+    this.clearConfigurationRestartWatchdog();
     this.detachGuiWindow();
     this.connected = false;
     const bot = this.bot;
@@ -489,6 +497,21 @@ export class McSession extends EventEmitter {
     queueMicrotask(tryWrite);
     setImmediate(tryWrite);
     setTimeout(tryWrite, 5);
+  }
+
+  private armConfigurationRestartWatchdog(client: { state?: string }): void {
+    this.clearConfigurationRestartWatchdog();
+    this.configurationRestartTimer = setTimeout(() => {
+      this.configurationRestartTimer = null;
+      if (!this.bot || client.state !== "configuration") return;
+      this.finishDisconnected("configuration restart did not finish");
+    }, 15_000);
+  }
+
+  private clearConfigurationRestartWatchdog(): void {
+    if (!this.configurationRestartTimer) return;
+    clearTimeout(this.configurationRestartTimer);
+    this.configurationRestartTimer = null;
   }
 }
 
