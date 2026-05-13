@@ -73,9 +73,9 @@ export class McSession extends EventEmitter {
       username: this.opts.username,
       auth: "microsoft",
       profilesFolder: this.opts.profilesFolder,
-      // Some proxy/limbo handoffs can leave more than 30s between keepalive
+      // Some proxy/limbo handoffs can leave long gaps between keepalive
       // packets even though chat/system packets are still flowing.
-      checkTimeoutInterval: 5 * 60 * 1000,
+      checkTimeoutInterval: 30 * 60 * 1000,
       // Prevent prismarine-auth from prompting on the *server* console — we
       // already completed the device-code flow before starting the bot.
       // (If the cached token is invalid we want a hard failure rather than
