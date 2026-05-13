@@ -48,6 +48,7 @@ export class McSession extends EventEmitter {
   private readonly cookies = new Map<string, Buffer>();
   private shuttingDown = false;
   private connected = false;
+  private ended = false;
   private lastChatAt = 0;
   private currentGuiWindow: Window | null = null;
   private currentGuiWindowListener: ((...args: unknown[]) => void) | null = null;
@@ -61,6 +62,7 @@ export class McSession extends EventEmitter {
 
   start(): void {
     if (this.bot) return;
+    this.ended = false;
     console.info(
       `[mc-session] starting ${this.opts.host}:${this.opts.port} mc=${this.opts.version}`,
     );
@@ -161,31 +163,24 @@ export class McSession extends EventEmitter {
     });
 
     bot.on("end", (reason: string) => {
-      const normalizedReason = reason || "ended";
-      console.warn(`[mc-session] ended reason=${normalizedReason}`);
-      this.stopAntiAfk();
-      this.detachGuiWindow();
-      this.connected = false;
-      this.emitMsg({
-        type: "status",
-        connected: false,
-        server: `${this.opts.host}:${this.opts.port}`,
-        reason: normalizedReason,
-      });
-      this.emit("ended", reason);
-      this.bot = null;
+      this.finishDisconnected(reason || "ended");
     });
 
     bot.on("error", (err: Error) => {
-      console.error("[mc-session] bot error", err);
+      const reason = normalizeRuntimeError(err);
+      console.error(`[mc-session] bot error reason=${reason}`, err);
       if (isMicrosoftAuthError(err)) {
         this.emitMsg({
           type: "auth_failed",
           reason: normalizeAuthError(err).message,
         });
+        if (!this.connected) this.finishDisconnected(reason);
         return;
       }
-      this.emitMsg({ type: "error", text: err.message });
+      this.emitMsg({ type: "error", text: reason });
+      if (!this.connected) {
+        this.finishDisconnected(reason);
+      }
     });
 
     bot.on("windowOpen", (window) => {
@@ -402,6 +397,32 @@ export class McSession extends EventEmitter {
         bot.quit(reason);
       } catch {
         // ignore — socket may already be dead
+      }
+    }
+  }
+
+  private finishDisconnected(reason: string): void {
+    if (this.ended) return;
+    this.ended = true;
+    const normalizedReason = reason || "ended";
+    console.warn(`[mc-session] ended reason=${normalizedReason}`);
+    this.stopAntiAfk();
+    this.detachGuiWindow();
+    this.connected = false;
+    const bot = this.bot;
+    this.bot = null;
+    this.emitMsg({
+      type: "status",
+      connected: false,
+      server: `${this.opts.host}:${this.opts.port}`,
+      reason: normalizedReason,
+    });
+    this.emit("ended", normalizedReason);
+    if (bot && !this.shuttingDown) {
+      try {
+        bot.quit(normalizedReason);
+      } catch {
+        // ignore
       }
     }
   }
@@ -715,6 +736,21 @@ function isMicrosoftAuthError(err: Error): boolean {
     message.includes("expired_token") ||
     message.includes("authorization_declined")
   );
+}
+
+function normalizeRuntimeError(err: Error): string {
+  const message = err.message?.trim() || String(err);
+  const lower = message.toLowerCase();
+  if (lower === "fetch failed" || lower.includes("fetch failed")) {
+    return "network request failed while preparing Minecraft login";
+  }
+  if (lower.includes("client timed out after")) {
+    return message;
+  }
+  if (lower.includes("getaddrinfo")) {
+    return "server DNS lookup failed";
+  }
+  return message;
 }
 
 function flattenKickComponent(value: unknown): string {

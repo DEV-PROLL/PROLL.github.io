@@ -212,6 +212,15 @@ export function ChatScreen({
           break;
         case "error":
           setPendingSlot(null);
+          setServerInfo((prev) =>
+            prev.connected
+              ? prev
+              : {
+                  ...prev,
+                  phase: prev.phase === "kicked" ? "kicked" : "offline",
+                  reason: msg.text,
+                },
+          );
           setMessages((prev) => [
             ...prev,
             {
