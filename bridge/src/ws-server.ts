@@ -282,7 +282,9 @@ async function handleMessage(
             expiresInSec: code.expires_in,
           });
         });
-        attachToSession(result, mcVersion, state, send, sessions);
+        attachToSession(result, mcVersion, state, send, sessions, {
+          rebuildExisting: true,
+        });
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         send({ type: "auth_failed", reason });
@@ -420,6 +422,7 @@ function attachToSession(
   state: ClientState,
   send: (m: ServerMessage) => void,
   sessions: SessionManager,
+  options: { rebuildExisting?: boolean } = {},
 ): void {
   detachClientSession(state, sessions);
 
@@ -434,6 +437,9 @@ function attachToSession(
   };
   try {
     const { userId, cacheUserId, ign, uuid, profilesFolder } = authResult;
+    if (options.rebuildExisting) {
+      sessions.forceCloseUser(userId);
+    }
     const sessionId = `${userId}@${mcVersion}`;
     const mc = sessions.attach(userId, cacheUserId, profilesFolder, mcVersion, listener);
     state.userId = userId;
