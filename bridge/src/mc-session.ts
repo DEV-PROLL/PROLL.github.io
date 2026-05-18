@@ -681,7 +681,7 @@ function summarizeValue(value: unknown, depth = 0): unknown {
   ) {
     return normalized;
   }
-  if (depth >= 3) return "[Object]";
+  if (depth >= 6) return "[Object]";
   if (normalized instanceof Map) {
     const entries: Record<string, unknown> = {};
     let count = 0;
