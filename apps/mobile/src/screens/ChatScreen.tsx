@@ -56,9 +56,14 @@ interface ActionBarState {
   ts: number;
 }
 
+interface TitleLineState {
+  text: string;
+  segments?: ChatSegment[];
+}
+
 interface TitleOverlayState {
-  title?: string;
-  subtitle?: string;
+  title?: TitleLineState;
+  subtitle?: TitleLineState;
   ts: number;
 }
 
@@ -251,7 +256,7 @@ export function ChatScreen({
           }
           setTitleOverlay((prev) => ({
             ...prev,
-            [msg.part]: msg.text,
+            [msg.part]: { text: msg.text, segments: msg.segments },
             ts: msg.ts,
           }));
           if (titleTimerRef.current) clearTimeout(titleTimerRef.current);
@@ -919,17 +924,29 @@ function TitleOverlay({ overlay }: { overlay: TitleOverlayState }) {
   return (
     <View pointerEvents="none" style={styles.titleOverlay}>
       {overlay.title ? (
-        <Text style={styles.titleOverlayText} numberOfLines={2}>
-          {overlay.title}
-        </Text>
+        <RichText
+          text={overlay.title.text}
+          segments={overlay.title.segments}
+          style={styles.titleOverlayText}
+          onSegmentClick={noopSegmentHandler}
+          onSegmentHover={noopSegmentHandler}
+        />
       ) : null}
       {overlay.subtitle ? (
-        <Text style={styles.titleOverlaySubtext} numberOfLines={2}>
-          {overlay.subtitle}
-        </Text>
+        <RichText
+          text={overlay.subtitle.text}
+          segments={overlay.subtitle.segments}
+          style={styles.titleOverlaySubtext}
+          onSegmentClick={noopSegmentHandler}
+          onSegmentHover={noopSegmentHandler}
+        />
       ) : null}
     </View>
   );
+}
+
+function noopSegmentHandler(_segment: ChatSegment) {
+  // Title overlays are display-only; click handlers are intentionally inert.
 }
 
 function titleStayMs(timing: TitleTimingState): number {

@@ -52,6 +52,8 @@ export type ServerMessage =
       part: "title" | "subtitle";
       text: string;
       ts: number;
+      segments?: ChatSegment[];
+      rawJson?: unknown;
     }
   | {
       type: "title";

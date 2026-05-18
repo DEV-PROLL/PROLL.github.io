@@ -144,6 +144,9 @@ const TRANSLATIONS: Record<string, string> = {
 export function plainText(msg: AnyChatMessage | string | undefined | null): string {
   if (msg == null) return "";
   if (typeof msg === "string") return replaceBrokenGlyphs(msg);
+  const source = msg.json ?? msg;
+  const componentText = componentPlainText(source);
+  if (componentText) return componentText;
   try {
     return replaceBrokenGlyphs(msg.toString());
   } catch {
@@ -159,8 +162,7 @@ export function rawJson(msg: AnyChatMessage | string | undefined | null): unknow
 
 export function richSegments(msg: AnyChatMessage | string | undefined | null): ChatSegment[] | undefined {
   if (msg == null) return undefined;
-  if (typeof msg === "string") return [{ text: msg }];
-  const source = msg.json ?? msg;
+  const source = typeof msg === "string" ? parseTextComponent(msg) : parseTextComponent(msg.json ?? msg);
   const segments = applyInlineFormatting(flattenComponent(source, {}));
   const merged = mergeAdjacentSegments(segments).filter((segment) => segment.text.length > 0);
   return merged.length > 0 ? merged : undefined;

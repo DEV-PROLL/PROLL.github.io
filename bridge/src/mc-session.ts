@@ -188,8 +188,8 @@ export class McSession extends EventEmitter {
       });
     });
 
-    bot.on("title", (text: string, type: "title" | "subtitle") => {
-      const normalized = String(text ?? "").trim();
+    bot.on("title", (component: unknown, type: "title" | "subtitle") => {
+      const normalized = plainText(component as never).trim();
       if (!normalized) return;
       this.emitMsg({
         type: "title",
@@ -197,6 +197,8 @@ export class McSession extends EventEmitter {
         part: type,
         text: normalized,
         ts: Date.now(),
+        segments: richSegments(component as never),
+        rawJson: rawJson(component as never) ?? component,
       });
     });
 
