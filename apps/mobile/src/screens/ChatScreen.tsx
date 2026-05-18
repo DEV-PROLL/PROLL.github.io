@@ -25,7 +25,6 @@ import type {
 } from "../protocol";
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
-import { removeSavedAccount } from "../store/settings";
 
 interface Props {
   bridgeUrl: string;
@@ -250,20 +249,18 @@ export function ChatScreen({
               ts: Date.now(),
             },
           ]);
-          void removeSavedAccount(userId).finally(() => {
-            if (Platform.OS === "web") {
-              onLogout();
-              return;
-            }
-            Alert.alert("다시 로그인 필요", msg.reason, [
-              {
-                text: "OK",
-                onPress: () => {
-                  onLogout();
-                },
+          if (Platform.OS === "web") {
+            onLogout();
+            break;
+          }
+          Alert.alert("다시 로그인 필요", msg.reason, [
+            {
+              text: "OK",
+              onPress: () => {
+                onLogout();
               },
-            ]);
-          });
+            },
+          ]);
           break;
         default:
           break;
