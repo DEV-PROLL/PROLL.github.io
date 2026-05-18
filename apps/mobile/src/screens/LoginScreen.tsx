@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -52,6 +53,8 @@ export function LoginScreen({
     "connecting",
   );
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const [accountToRemove, setAccountToRemove] = useState<SavedAccount | null>(null);
+  const [removePending, setRemovePending] = useState(false);
 
   useEffect(() => {
     void getSavedAccounts().then(setAccounts);
@@ -109,20 +112,18 @@ export function LoginScreen({
   };
 
   const forgetAccount = async (account: SavedAccount) => {
-    send({ type: "forget_account", userId: account.userId });
-    const next = await removeSavedAccount(account.userId);
-    setAccounts(next);
+    setRemovePending(true);
+    try {
+      send({ type: "forget_account", userId: account.userId });
+      const next = await removeSavedAccount(account.userId);
+      setAccounts(next);
+      setAccountToRemove(null);
+    } finally {
+      setRemovePending(false);
+    }
   };
 
   const removeAccount = (account: SavedAccount) => {
-    if (Platform.OS === "web") {
-      const ok =
-        typeof globalThis.confirm !== "function" ||
-        globalThis.confirm(`${account.ign} 계정을 이 기기 목록에서 삭제할까요?`);
-      if (ok) void forgetAccount(account);
-      return;
-    }
-
     Alert.alert(
       "계정 삭제",
       `${account.ign} 계정을 이 기기 목록에서 삭제할까요?`,
@@ -137,6 +138,14 @@ export function LoginScreen({
         },
       ],
     );
+  };
+
+  const requestRemoveAccount = (account: SavedAccount) => {
+    if (Platform.OS === "web") {
+      setAccountToRemove(account);
+      return;
+    }
+    removeAccount(account);
   };
 
   const copyCode = async () => {
@@ -201,7 +210,7 @@ export function LoginScreen({
                       styles.removeButton,
                       pressed ? styles.removeButtonPressed : null,
                     ]}
-                    onPress={() => removeAccount(account)}
+                    onPress={() => requestRemoveAccount(account)}
                   >
                     <Text style={styles.removeText}>삭제</Text>
                   </Pressable>
@@ -244,7 +253,63 @@ export function LoginScreen({
       )}
 
       {error && <Text style={styles.error}>{error}</Text>}
+
+      <DeleteAccountModal
+        account={accountToRemove}
+        pending={removePending}
+        onCancel={() => {
+          if (!removePending) setAccountToRemove(null);
+        }}
+        onConfirm={(account) => {
+          void forgetAccount(account);
+        }}
+      />
     </ScrollView>
+  );
+}
+
+function DeleteAccountModal({
+  account,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  account: SavedAccount | null;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: (account: SavedAccount) => void;
+}) {
+  return (
+    <Modal visible={!!account} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.modalOverlay}>
+        <GlassPanel style={styles.modalCard}>
+          <MinecraftHead uuid={account?.uuid} size={54} />
+          <Text style={styles.modalTitle}>계정 삭제</Text>
+          <Text style={styles.modalBody}>
+            {account?.ign ?? "이 계정"}을 이 기기 목록에서 삭제할까요?
+          </Text>
+          <View style={styles.modalActions}>
+            <PrimaryButton
+              variant="secondary"
+              disabled={pending}
+              onPress={onCancel}
+              style={styles.modalButton}
+            >
+              취소
+            </PrimaryButton>
+            <PrimaryButton
+              loading={pending}
+              onPress={() => {
+                if (account) onConfirm(account);
+              }}
+              style={[styles.modalButton, styles.deleteConfirmButton]}
+            >
+              삭제
+            </PrimaryButton>
+          </View>
+        </GlassPanel>
+      </View>
+    </Modal>
   );
 }
 
@@ -449,5 +514,45 @@ const styles = StyleSheet.create({
     marginTop: 24,
     textAlign: "center",
     fontWeight: "700",
+  },
+  modalOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "rgba(1, 4, 9, 0.72)",
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 360,
+    alignItems: "center",
+    padding: 22,
+  },
+  modalTitle: {
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: "900",
+    marginTop: 14,
+  },
+  modalBody: {
+    color: theme.textDim,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: "center",
+    marginTop: 8,
+  },
+  modalActions: {
+    width: "100%",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 20,
+  },
+  modalButton: {
+    flex: 1,
+    minHeight: 50,
+  },
+  deleteConfirmButton: {
+    backgroundColor: "rgba(248, 81, 73, 0.72)",
+    borderColor: "rgba(248, 81, 73, 0.52)",
   },
 });

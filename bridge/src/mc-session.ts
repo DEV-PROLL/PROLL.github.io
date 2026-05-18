@@ -806,7 +806,7 @@ function normalizeRuntimeError(err: Error): string {
   const message = err.message?.trim() || String(err);
   const lower = message.toLowerCase();
   if (lower === "fetch failed" || lower.includes("fetch failed")) {
-    return "network request failed while preparing Minecraft login";
+    return "로그인 서버 연결 실패: 브릿지 서버가 Microsoft/Minecraft 인증 서버에 접속하지 못했습니다.";
   }
   if (lower.includes("client timed out after")) {
     return message;
