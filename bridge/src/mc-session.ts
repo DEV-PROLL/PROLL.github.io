@@ -586,7 +586,7 @@ function serializeWindow(window: Window): GuiWindow {
 
 function serializeItem(item: Item | null | undefined): GuiItem | null {
   if (!item) return null;
-  const displayName =
+  const customDisplayName =
     componentPlainText(item.customName) ||
     componentPlainText(readItemComponent(item, [
       "minecraft:custom_name",
@@ -600,14 +600,16 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
       "display_name",
       "displayName",
     ])) ||
-    componentPlainText(readItemNbtDisplayField(item, "Name")) ||
-    item.displayName;
-  const lore = firstNonEmptyLore([
+    componentPlainText(readItemNbtDisplayField(item, "Name"));
+  const rawLore = firstNonEmptyLore([
     item.customLore,
     readItemComponent(item, ["minecraft:lore", "lore", "Lore", "customLore"]),
     readItemComponent(item, ["minecraft:tooltip", "tooltip", "Tooltips"]),
     readItemNbtDisplayField(item, "Lore"),
   ]);
+  const inferredDisplayName = !customDisplayName ? rawLore[0] : undefined;
+  const displayName = customDisplayName || inferredDisplayName || item.displayName;
+  const lore = inferredDisplayName ? rawLore.slice(1) : rawLore;
   debugGuiItem(item, displayName, lore);
   return {
     name: item.name,
