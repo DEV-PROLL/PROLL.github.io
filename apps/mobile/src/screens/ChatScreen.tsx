@@ -455,35 +455,29 @@ export function ChatScreen({
   const handleSegmentClick = (segment: ChatSegment) => {
     const event = segment.clickEvent;
     if (!event) return;
-    switch (event.action) {
+    switch (event.action.toLowerCase()) {
       case "run_command":
-        Alert.alert("Run command?", event.value, [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Run",
-            onPress: () => {
-              if (!serverInfo.connected) return;
-              send({ type: "send", text: event.value });
-            },
-          },
-        ]);
+        if (!serverInfo.connected) {
+          Alert.alert("Not in server", "Reconnect before running this command.");
+          return;
+        }
+        if (!send({ type: "send", text: event.value })) {
+          Alert.alert("Not connected", "Wait for the bridge to reconnect.");
+        }
         break;
       case "suggest_command":
         setInput(event.value);
+        latestInputRef.current = event.value;
+        setCompletionMatches([]);
+        setTimeout(() => textInputRef.current?.focus(), 0);
         break;
       case "open_url":
-        Alert.alert("Open link?", event.value, [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Open",
-            onPress: () => {
-              void Linking.openURL(event.value);
-            },
-          },
-        ]);
+        openExternalUrl(event.value);
         break;
       case "copy_to_clipboard":
-        void Clipboard.setStringAsync(event.value);
+        void Clipboard.setStringAsync(event.value).catch(() => {
+          Alert.alert("Copy failed", event.value);
+        });
         break;
       default:
         Alert.alert(event.action, event.value);
@@ -721,6 +715,30 @@ export function ChatScreen({
       </View>
     </KeyboardAvoidingView>
   );
+}
+
+function openExternalUrl(url: string) {
+  const trimmed = url.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    Alert.alert("Unsupported link", trimmed);
+    return;
+  }
+
+  if (Platform.OS === "web") {
+    const browser = globalThis as unknown as {
+      open?: (url: string, target?: string, features?: string) => unknown;
+      location?: { href: string };
+    };
+    const opened = browser.open?.(trimmed, "_blank", "noopener,noreferrer");
+    if (!opened && browser.location) {
+      browser.location.href = trimmed;
+    }
+    return;
+  }
+
+  void Linking.openURL(trimmed).catch(() => {
+    Alert.alert("Open link failed", trimmed);
+  });
 }
 
 function Row({
