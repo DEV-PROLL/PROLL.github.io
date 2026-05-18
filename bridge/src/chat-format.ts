@@ -36,6 +36,12 @@ interface SegmentStyle {
   hoverText?: string;
 }
 
+interface MinecraftDataModule {
+  (version: string): { language?: Record<string, string> };
+}
+
+const minecraftData = require("minecraft-data") as MinecraftDataModule;
+
 const MC_COLORS: Record<string, string> = {
   black: "#000000",
   dark_blue: "#0000aa",
@@ -79,6 +85,8 @@ const MINI_COLOR_ALIASES: Record<string, string> = {
   grey: MC_COLORS.gray,
   dark_grey: MC_COLORS.dark_gray,
 };
+
+const VANILLA_LANGUAGE = loadVanillaLanguage();
 
 const TRANSLATIONS: Record<string, string> = {
   "chat.type.text": "<%1$s> %2$s",
@@ -244,7 +252,10 @@ function inheritStyle(component: {
 
 function flattenTranslate(translate: string, withValue: unknown, style: SegmentStyle): ChatSegment[] {
   const args = Array.isArray(withValue) ? withValue : [];
-  const template = TRANSLATIONS[translate] ?? fallbackTranslation(translate, args.length);
+  const template =
+    TRANSLATIONS[translate] ??
+    VANILLA_LANGUAGE[translate] ??
+    fallbackTranslation(translate, args.length);
   if (template) {
     return applyTranslationTemplate(template, args, style);
   }
@@ -256,6 +267,24 @@ function flattenTranslate(translate: string, withValue: unknown, style: SegmentS
     segments.push(...flattenComponent(arg, style));
   });
   return segments;
+}
+
+function loadVanillaLanguage(): Record<string, string> {
+  const versions = [
+    process.env.MC_VERSION,
+    "1.21.11",
+    "1.21.9",
+    "1.21.8",
+  ].filter((version): version is string => Boolean(version));
+
+  for (const version of versions) {
+    try {
+      return minecraftData(version).language ?? {};
+    } catch {
+      // Try the next closest protocol data version.
+    }
+  }
+  return {};
 }
 
 function fallbackTranslation(translate: string, argCount: number): string | null {
