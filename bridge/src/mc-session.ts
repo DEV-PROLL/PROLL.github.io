@@ -68,6 +68,7 @@ export class McSession extends EventEmitter {
   private playerListTimer: NodeJS.Timeout | null = null;
   private lastPlayerListSignature = "";
   private lastBossBarsSignature = "";
+  private readonly suppressedBossBarIds = new Set<string>();
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
@@ -151,12 +152,20 @@ export class McSession extends EventEmitter {
     bot.on("playerLeft", emitPlayersSoon);
     bot.on("playerUpdated", emitPlayersSoon);
 
-    const emitBossBarsSoon = () => {
+    const emitBossBarsSoon = (bar?: { entityUUID?: string }) => {
+      if (typeof bar?.entityUUID === "string") {
+        this.suppressedBossBarIds.delete(bar.entityUUID);
+      }
       setTimeout(() => this.emitBossBars(), 0);
     };
     bot.on("bossBarCreated", emitBossBarsSoon);
     bot.on("bossBarUpdated", emitBossBarsSoon);
-    bot.on("bossBarDeleted", emitBossBarsSoon);
+    bot.on("bossBarDeleted", (bar?: { entityUUID?: string }) => {
+      if (typeof bar?.entityUUID === "string") {
+        this.suppressedBossBarIds.delete(bar.entityUUID);
+      }
+      setTimeout(() => this.emitBossBars(), 0);
+    });
 
     // `messagestr` is mineflayer's "any chat-like message" event including
     // system messages, deaths, joins, leaves. Use the underlying ChatMessage
@@ -444,6 +453,7 @@ export class McSession extends EventEmitter {
     this.detachGuiWindow();
     this.stopPlayerListSync();
     this.lastBossBarsSignature = "";
+    this.suppressedBossBarIds.clear();
     const bot = this.bot;
     this.bot = null;
     if (bot) {
@@ -466,6 +476,7 @@ export class McSession extends EventEmitter {
     this.detachGuiWindow();
     this.stopPlayerListSync();
     this.lastBossBarsSignature = "";
+    this.suppressedBossBarIds.clear();
     this.connected = false;
     const bot = this.bot;
     this.bot = null;
@@ -571,6 +582,9 @@ export class McSession extends EventEmitter {
   }
 
   private clearBossBars(): void {
+    for (const bar of this.currentBossBars(false)) {
+      this.suppressedBossBarIds.add(bar.id);
+    }
     this.lastBossBarsSignature = "[]";
     this.emitMsg({
       type: "boss_bars",
@@ -583,9 +597,16 @@ export class McSession extends EventEmitter {
     if (!this.bot || !this.connected) return null;
     return {
       type: "boss_bars",
-      bars: serializeBossBars(this.bot),
+      bars: this.currentBossBars(),
       ts: Date.now(),
     };
+  }
+
+  private currentBossBars(filterSuppressed = true): BossBarSummary[] {
+    if (!this.bot) return [];
+    const bars = serializeBossBars(this.bot);
+    if (!filterSuppressed || this.suppressedBossBarIds.size === 0) return bars;
+    return bars.filter((bar) => !this.suppressedBossBarIds.has(bar.id));
   }
 
   private playerUuid(username: string): string | undefined {
