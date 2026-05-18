@@ -107,6 +107,7 @@ export function ChatScreen({
   }>({ connected: false, phase: "joining" });
   const [activeWindow, setActiveWindow] = useState<GuiWindow | null>(null);
   const [selectedWindowSlot, setSelectedWindowSlot] = useState<number | null>(null);
+  const [previewWindowSlot, setPreviewWindowSlot] = useState<number | null>(null);
   const [pendingSlot, setPendingSlot] = useState<number | null>(null);
   const [tooltipText, setTooltipText] = useState<string | null>(null);
   const listRef = useRef<FlatList<DisplayedMessage>>(null);
@@ -191,6 +192,7 @@ export function ChatScreen({
           if (!msg.connected) {
             setActiveWindow(null);
             setSelectedWindowSlot(null);
+            setPreviewWindowSlot(null);
             setPendingSlot(null);
             setPlayerList([]);
             setBossBars([]);
@@ -276,20 +278,19 @@ export function ChatScreen({
         case "window_open":
           setActiveWindow(msg.window);
           setSelectedWindowSlot(null);
+          setPreviewWindowSlot(null);
           setPendingSlot(null);
           break;
         case "window_update":
           setActiveWindow(msg.window);
-          setSelectedWindowSlot((current) =>
-            current != null && visibleGuiSlots(msg.window).some((slot) => slot.index === current)
-              ? current
-              : null,
-          );
+          setSelectedWindowSlot((current) => validGuiSlotIndex(msg.window, current));
+          setPreviewWindowSlot((current) => validGuiSlotIndex(msg.window, current));
           setPendingSlot(null);
           break;
         case "window_close":
           setActiveWindow(null);
           setSelectedWindowSlot(null);
+          setPreviewWindowSlot(null);
           setPendingSlot(null);
           break;
         case "kicked":
@@ -302,6 +303,7 @@ export function ChatScreen({
           }));
           setActiveWindow(null);
           setSelectedWindowSlot(null);
+          setPreviewWindowSlot(null);
           setPendingSlot(null);
           setPlayerList([]);
           setBossBars([]);
@@ -340,6 +342,7 @@ export function ChatScreen({
         case "auth_failed":
           setActiveWindow(null);
           setSelectedWindowSlot(null);
+          setPreviewWindowSlot(null);
           setPendingSlot(null);
           clearTransientOverlays();
           setServerInfo((prev) => ({
@@ -389,6 +392,7 @@ export function ChatScreen({
       lastAuthAttemptAtRef.current = now;
       setActiveWindow(null);
       setSelectedWindowSlot(null);
+      setPreviewWindowSlot(null);
       setPendingSlot(null);
       clearTransientOverlays();
       setServerInfo((prev) => ({
@@ -607,8 +611,13 @@ export function ChatScreen({
     }
   };
 
+  const handleWindowSlotPreview = (slot: GuiSlot) => {
+    setPreviewWindowSlot(slot.index);
+  };
+
   const handleWindowSlotSelect = (slot: GuiSlot) => {
     setSelectedWindowSlot(slot.index);
+    setPreviewWindowSlot(slot.index);
   };
 
   const handleWindowSelectedClick = () => {
@@ -627,6 +636,7 @@ export function ChatScreen({
     send({ type: "window_close" });
     setActiveWindow(null);
     setSelectedWindowSlot(null);
+    setPreviewWindowSlot(null);
     setPendingSlot(null);
   };
 
@@ -819,8 +829,10 @@ export function ChatScreen({
           <GuiWindowModal
             gui={activeWindow}
             selectedSlotIndex={selectedWindowSlot}
+            previewSlotIndex={previewWindowSlot}
             pendingSlot={pendingSlot}
             onClose={handleWindowClose}
+            onSlotPreview={handleWindowSlotPreview}
             onSlotSelect={handleWindowSlotSelect}
             onClickSelected={handleWindowSelectedClick}
           />
@@ -1149,15 +1161,19 @@ function disconnectCopy(
 function GuiWindowModal({
   gui,
   selectedSlotIndex,
+  previewSlotIndex,
   pendingSlot,
   onClose,
+  onSlotPreview,
   onSlotSelect,
   onClickSelected,
 }: {
   gui: GuiWindow;
   selectedSlotIndex: number | null;
+  previewSlotIndex: number | null;
   pendingSlot: number | null;
   onClose: () => void;
+  onSlotPreview: (slot: GuiSlot) => void;
   onSlotSelect: (slot: GuiSlot) => void;
   onClickSelected: () => void;
 }) {
@@ -1166,6 +1182,12 @@ function GuiWindowModal({
     selectedSlotIndex == null
       ? null
       : visibleSlots.find((slot) => slot.index === selectedSlotIndex) ?? null;
+  const previewSlot =
+    previewSlotIndex == null
+      ? null
+      : visibleSlots.find((slot) => slot.index === previewSlotIndex) ?? null;
+  const detailSlot = previewSlot ?? selectedSlot;
+  const detailItem = detailSlot?.item ?? null;
   const selectedItem = selectedSlot?.item ?? null;
   const filled = visibleSlots.filter((slot) => slot.item).length;
   const canClickSelected = Boolean(selectedItem) && pendingSlot == null;
@@ -1188,41 +1210,25 @@ function GuiWindowModal({
             </Pressable>
           </View>
 
-          <FlatList
-            key={`gui-${gui.id}`}
-            data={visibleSlots}
-            keyExtractor={(slot) => `${gui.id}-${slot.index}`}
-            numColumns={9}
-            style={styles.guiGridList}
-            contentContainerStyle={styles.guiGrid}
-            renderItem={({ item }) => (
-              <GuiSlotCell
-                slot={item}
-                selected={selectedSlotIndex === item.index}
-                pending={pendingSlot === item.index}
-                onPreview={() => onSlotSelect(item)}
-              />
-            )}
-          />
-
           <View style={styles.guiDetailCard}>
-            {selectedItem ? (
+            {detailItem ? (
               <ScrollView
                 style={styles.guiDetailScroll}
                 contentContainerStyle={styles.guiDetailScrollContent}
                 nestedScrollEnabled
               >
                 <Text style={styles.guiDetailName} numberOfLines={2}>
-                  {itemLabel(selectedItem)}
+                  {itemLabel(detailItem)}
                 </Text>
                 <Text style={styles.guiDetailMeta} numberOfLines={1}>
-                  슬롯 {selectedSlot?.index ?? "-"} · {selectedItem.name}
+                  슬롯 {detailSlot?.index ?? "-"} · {detailItem.name}
+                  {selectedSlot?.index === detailSlot?.index ? " · 실행 대상" : ""}
                 </Text>
-                {selectedItem.lore?.length ? (
+                {detailItem.lore?.length ? (
                   <View style={styles.guiLoreList}>
-                    {selectedItem.lore.map((line, index) => (
+                    {detailItem.lore.map((line, index) => (
                       <Text
-                        key={`${selectedItem.name}-${index}-${line}`}
+                        key={`${detailItem.name}-${index}-${line}`}
                         style={styles.guiLoreText}
                       >
                         {line}
@@ -1235,10 +1241,29 @@ function GuiWindowModal({
               </ScrollView>
             ) : (
               <Text style={[styles.guiLoreEmpty, styles.guiDetailEmpty]}>
-                {selectedSlot ? `빈 슬롯 ${selectedSlot.index}` : "슬롯을 선택하면 이름과 로어가 표시됩니다"}
+                {detailSlot ? `빈 슬롯 ${detailSlot.index}` : "슬롯에 마우스를 올리거나 탭하면 이름과 로어가 표시됩니다"}
               </Text>
             )}
           </View>
+
+          <FlatList
+            key={`gui-${gui.id}`}
+            data={visibleSlots}
+            keyExtractor={(slot) => `${gui.id}-${slot.index}`}
+            numColumns={9}
+            style={styles.guiGridList}
+            contentContainerStyle={styles.guiGrid}
+            renderItem={({ item }) => (
+              <GuiSlotCell
+                slot={item}
+                selected={selectedSlotIndex === item.index}
+                previewed={detailSlot?.index === item.index && selectedSlotIndex !== item.index}
+                pending={pendingSlot === item.index}
+                onPreview={() => onSlotPreview(item)}
+                onSelect={() => onSlotSelect(item)}
+              />
+            )}
+          />
 
           <View style={styles.guiFooter}>
             <View style={styles.guiSelectionCopy}>
@@ -1365,13 +1390,17 @@ function PlayerListModal({
 function GuiSlotCell({
   slot,
   selected,
+  previewed,
   pending,
   onPreview,
+  onSelect,
 }: {
   slot: GuiSlot;
   selected: boolean;
+  previewed: boolean;
   pending: boolean;
   onPreview: () => void;
+  onSelect: () => void;
 }) {
   const item = slot.item;
   const label = item ? shortItemLabel(item) : "";
@@ -1383,10 +1412,11 @@ function GuiSlotCell({
         styles.guiSlot,
         item ? { borderColor: itemColor(item.name) } : null,
         selected ? styles.guiSlotSelected : null,
+        previewed ? styles.guiSlotPreviewed : null,
         pressed ? styles.guiSlotPressed : null,
         pending ? styles.guiSlotPending : null,
       ]}
-      onPress={onPreview}
+      onPress={onSelect}
       onHoverIn={onPreview}
       onLongPress={() => Alert.alert(`Slot ${slot.index}`, detail)}
     >
@@ -1415,6 +1445,11 @@ function visibleGuiSlots(gui: GuiWindow): GuiSlot[] {
       : gui.slots.length;
   const visibleSlots = gui.slots.filter((slot) => slot.index < containerSlotCount);
   return visibleSlots.length > 0 ? visibleSlots : gui.slots;
+}
+
+function validGuiSlotIndex(gui: GuiWindow, index: number | null): number | null {
+  if (index == null) return null;
+  return visibleGuiSlots(gui).some((slot) => slot.index === index) ? index : null;
 }
 
 function itemLabel(item: GuiItem): string {
@@ -1900,7 +1935,7 @@ const styles = StyleSheet.create({
   guiPanel: {
     width: "100%",
     maxWidth: 760,
-    height: "82%",
+    maxHeight: "86%",
     backgroundColor: "rgba(13, 17, 23, 0.96)",
     borderColor: theme.glassBorder,
     borderWidth: 1,
@@ -1946,7 +1981,9 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   guiGridList: {
+    flexGrow: 0,
     flexShrink: 1,
+    maxHeight: 292,
   },
   guiGrid: {
     alignItems: "center",
@@ -1973,6 +2010,10 @@ const styles = StyleSheet.create({
     borderColor: theme.accent,
     borderWidth: 2,
     backgroundColor: "rgba(126, 231, 135, 0.1)",
+  },
+  guiSlotPreviewed: {
+    borderColor: "rgba(240, 246, 252, 0.5)",
+    backgroundColor: "rgba(240, 246, 252, 0.08)",
   },
   guiSlotPending: {
     borderColor: theme.accentSoft,
@@ -2007,12 +2048,13 @@ const styles = StyleSheet.create({
   },
   guiDetailCard: {
     marginHorizontal: 16,
-    marginBottom: 10,
+    marginTop: 12,
+    marginBottom: 2,
     borderRadius: 14,
     borderColor: theme.glassBorder,
     borderWidth: 1,
     backgroundColor: "rgba(13, 17, 23, 0.76)",
-    height: 128,
+    height: 156,
     overflow: "hidden",
   },
   guiDetailScroll: {
