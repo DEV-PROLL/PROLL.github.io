@@ -45,6 +45,12 @@ export type ServerMessage =
       matches: CompletionMatch[];
     }
   | {
+      type: "player_list";
+      playersOnline: number;
+      players: PlayerSummary[];
+      ts: number;
+    }
+  | {
       type: "window_open" | "window_update";
       window: GuiWindow;
     }
@@ -70,6 +76,13 @@ export interface ChatSegment {
     value: string;
   };
   hoverText?: string;
+}
+
+export interface PlayerSummary {
+  name: string;
+  uuid?: string;
+  displayName?: string;
+  ping?: number;
 }
 
 export interface GuiWindow {

@@ -61,6 +61,8 @@ export class SessionManager {
     }
     const status = entry.session.statusSnapshot();
     if (status) onMessage(status);
+    const playerList = entry.session.playerListSnapshot();
+    if (playerList) onMessage(playerList);
     entry.session.on("message", onMessage);
     return entry.session;
   }

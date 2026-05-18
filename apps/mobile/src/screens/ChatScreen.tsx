@@ -21,6 +21,7 @@ import type {
   GuiItem,
   GuiSlot,
   GuiWindow,
+  PlayerSummary,
   ServerMessage,
 } from "../protocol";
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
@@ -65,6 +66,8 @@ export function ChatScreen({
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
   const [completionMatches, setCompletionMatches] = useState<CompletionMatch[]>([]);
+  const [playerList, setPlayerList] = useState<PlayerSummary[]>([]);
+  const [playerListOpen, setPlayerListOpen] = useState(false);
   const [serverInfo, setServerInfo] = useState<{
     server?: string;
     online?: number;
@@ -138,6 +141,7 @@ export function ChatScreen({
             setActiveWindow(null);
             setSelectedWindowSlot(null);
             setPendingSlot(null);
+            setPlayerList([]);
           }
           if (msg.connected) {
             autoReconnectAttemptRef.current = 0;
@@ -161,6 +165,13 @@ export function ChatScreen({
               reason: msg.reason ?? prev.reason,
             };
           });
+          break;
+        case "player_list":
+          setPlayerList(msg.players);
+          setServerInfo((prev) => ({
+            ...prev,
+            online: msg.playersOnline,
+          }));
           break;
         case "completion":
           if (
@@ -200,6 +211,7 @@ export function ChatScreen({
           setActiveWindow(null);
           setSelectedWindowSlot(null);
           setPendingSlot(null);
+          setPlayerList([]);
           setMessages((prev) => [
             ...prev,
             {
@@ -520,6 +532,18 @@ export function ChatScreen({
     ]);
   };
 
+  const handlePlayerSelect = (player: PlayerSummary) => {
+    const whisper = `/귓 ${player.name} `;
+    setInput(whisper);
+    latestInputRef.current = whisper;
+    setCompletionMatches([]);
+    setPlayerListOpen(false);
+    setTimeout(() => textInputRef.current?.focus(), 50);
+  };
+
+  const onlineCount =
+    serverInfo.online ?? (playerList.length > 0 ? playerList.length : undefined);
+
   return (
     <KeyboardAvoidingView
       style={styles.root}
@@ -536,15 +560,29 @@ export function ChatScreen({
             <Text style={styles.headerIgn} numberOfLines={1}>{ign}</Text>
             <Text style={styles.headerSub} numberOfLines={1}>
               {serverAddress} · MC {mcVersion}
-              {serverInfo.online != null ? `  ·  ${serverInfo.online} online` : ""}
             </Text>
           </View>
           <View style={styles.headerActions}>
-            <ConnectionPill
-              state={state}
-              connected={serverInfo.connected}
-              phase={serverInfo.phase}
-            />
+            <View style={styles.statusStack}>
+              <ConnectionPill
+                state={state}
+                connected={serverInfo.connected}
+                phase={serverInfo.phase}
+              />
+              <Pressable
+                disabled={onlineCount == null}
+                onPress={() => setPlayerListOpen(true)}
+                style={({ pressed }) => [
+                  styles.playerCountBtn,
+                  pressed ? styles.playerCountBtnPressed : null,
+                  onlineCount == null ? styles.playerCountBtnDisabled : null,
+                ]}
+              >
+                <Text style={styles.playerCountText}>
+                  {onlineCount != null ? `${onlineCount}명` : "-명"}
+                </Text>
+              </Pressable>
+            </View>
             <Pressable style={styles.logoutBtn} onPress={confirmLogout}>
               <Text style={styles.logoutText}>•••</Text>
             </Pressable>
@@ -669,6 +707,16 @@ export function ChatScreen({
 
         {tooltipText ? (
           <TooltipModal text={tooltipText} onClose={() => setTooltipText(null)} />
+        ) : null}
+
+        {playerListOpen ? (
+          <PlayerListModal
+            players={playerList}
+            onlineCount={onlineCount}
+            currentIgn={ign}
+            onClose={() => setPlayerListOpen(false)}
+            onSelect={handlePlayerSelect}
+          />
         ) : null}
       </View>
     </KeyboardAvoidingView>
@@ -993,6 +1041,77 @@ function TooltipModal({ text, onClose }: { text: string; onClose: () => void }) 
   );
 }
 
+function PlayerListModal({
+  players,
+  onlineCount,
+  currentIgn,
+  onClose,
+  onSelect,
+}: {
+  players: PlayerSummary[];
+  onlineCount?: number;
+  currentIgn: string;
+  onClose: () => void;
+  onSelect: (player: PlayerSummary) => void;
+}) {
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.playerListBackdrop} onPress={onClose}>
+        <Pressable style={styles.playerListPanel}>
+          <View style={styles.playerListHeader}>
+            <View>
+              <Text style={styles.playerListTitle}>온라인 플레이어</Text>
+              <Text style={styles.playerListSubtitle}>
+                {onlineCount != null ? `${onlineCount}명 접속 중` : "목록 수신 대기 중"}
+              </Text>
+            </View>
+            <Pressable style={styles.playerListCloseBtn} onPress={onClose}>
+              <Text style={styles.playerListCloseText}>×</Text>
+            </Pressable>
+          </View>
+
+          {players.length > 0 ? (
+            <FlatList
+              data={players}
+              keyExtractor={(player) => player.uuid || player.name}
+              style={styles.playerRows}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.playerRow,
+                    item.name === currentIgn ? styles.playerRowSelf : null,
+                    pressed ? styles.playerRowPressed : null,
+                  ]}
+                  onPress={() => onSelect(item)}
+                >
+                  <MinecraftHead uuid={item.uuid} size={34} style={styles.playerRowHead} />
+                  <View style={styles.playerRowCopy}>
+                    <Text style={styles.playerRowName} numberOfLines={1}>
+                      {item.name}
+                      {item.name === currentIgn ? " · 나" : ""}
+                    </Text>
+                    <Text style={styles.playerRowMeta} numberOfLines={1}>
+                      {item.displayName || "탭하면 귓속말 입력"}
+                    </Text>
+                  </View>
+                  {item.ping != null ? (
+                    <Text style={styles.playerPing}>{Math.round(item.ping)}ms</Text>
+                  ) : null}
+                </Pressable>
+              )}
+            />
+          ) : (
+            <Text style={styles.playerListEmpty}>
+              서버가 플레이어 목록을 아직 보내지 않았습니다.
+            </Text>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function GuiSlotCell({
   slot,
   selected,
@@ -1058,7 +1177,7 @@ function itemDetail(item: GuiItem): string {
 }
 
 function shortItemLabel(item: GuiItem): string {
-  const cleaned = (item.displayName || item.name)
+  const cleaned = (item.name || item.displayName)
     .replace(/^minecraft:/, "")
     .replace(/_/g, " ")
     .trim();
@@ -1155,6 +1274,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     marginLeft: 10,
+  },
+  statusStack: {
+    alignItems: "center",
+    gap: 5,
+  },
+  playerCountBtn: {
+    minWidth: 58,
+    minHeight: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 11,
+    paddingHorizontal: 8,
+    backgroundColor: "rgba(240, 246, 252, 0.05)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+  },
+  playerCountBtnPressed: {
+    opacity: 0.78,
+    transform: [{ scale: 0.96 }],
+  },
+  playerCountBtnDisabled: {
+    opacity: 0.5,
+  },
+  playerCountText: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: "900",
   },
   logoutBtn: {
     width: 38,
@@ -1602,5 +1748,105 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 13,
     fontWeight: "800",
+  },
+  playerListBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    paddingHorizontal: 14,
+    paddingBottom: Platform.OS === "ios" ? 26 : 14,
+  },
+  playerListPanel: {
+    width: "100%",
+    maxWidth: 620,
+    maxHeight: "72%",
+    backgroundColor: "rgba(13, 17, 23, 0.98)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+    borderRadius: 22,
+    overflow: "hidden",
+  },
+  playerListHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomColor: theme.glassBorder,
+    borderBottomWidth: 1,
+  },
+  playerListTitle: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  playerListSubtitle: {
+    color: theme.textDim,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  playerListCloseBtn: {
+    width: 38,
+    height: 38,
+    marginLeft: "auto",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 19,
+    backgroundColor: "rgba(240, 246, 252, 0.06)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+  },
+  playerListCloseText: {
+    color: theme.text,
+    fontSize: 24,
+    lineHeight: 27,
+    fontWeight: "800",
+  },
+  playerRows: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  playerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 10,
+  },
+  playerRowSelf: {
+    backgroundColor: "rgba(126, 231, 135, 0.08)",
+  },
+  playerRowPressed: {
+    backgroundColor: "rgba(240, 246, 252, 0.08)",
+    transform: [{ scale: 0.99 }],
+  },
+  playerRowHead: {
+    flexShrink: 0,
+  },
+  playerRowCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  playerRowName: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  playerRowMeta: {
+    color: theme.textDim,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  playerPing: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  playerListEmpty: {
+    color: theme.textDim,
+    fontSize: 14,
+    lineHeight: 20,
+    padding: 18,
   },
 });

@@ -4,7 +4,13 @@ import type { Bot } from "mineflayer";
 import type { Item } from "prismarine-item";
 import type { Window } from "prismarine-windows";
 import { normalizeAuthError } from "./auth";
-import type { CompletionMatch, GuiItem, GuiWindow, ServerMessage } from "./types";
+import type {
+  CompletionMatch,
+  GuiItem,
+  GuiWindow,
+  PlayerSummary,
+  ServerMessage,
+} from "./types";
 import {
   componentPlainText,
   extractSender,
@@ -12,6 +18,8 @@ import {
   rawJson,
   richSegments,
 } from "./chat-format";
+
+type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
 
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
 const debuggedGuiItems = new Set<string>();
@@ -55,6 +63,8 @@ export class McSession extends EventEmitter {
   private lastChatAt = 0;
   private currentGuiWindow: Window | null = null;
   private currentGuiWindowListener: ((...args: unknown[]) => void) | null = null;
+  private playerListTimer: NodeJS.Timeout | null = null;
+  private lastPlayerListSignature = "";
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
@@ -127,8 +137,16 @@ export class McSession extends EventEmitter {
       console.info(`[mc-session] spawned ign=${ign} mc=${this.opts.version}`);
       this.emitMsg({ type: "auth_ok", userId: ign, ign, uuid });
       this.markConnected();
+      this.startPlayerListSync();
       this.startAntiAfk();
     });
+
+    const emitPlayersSoon = () => {
+      setTimeout(() => this.emitPlayerList(), 0);
+    };
+    bot.on("playerJoined", emitPlayersSoon);
+    bot.on("playerLeft", emitPlayersSoon);
+    bot.on("playerUpdated", emitPlayersSoon);
 
     // `messagestr` is mineflayer's "any chat-like message" event including
     // system messages, deaths, joins, leaves. Use the underlying ChatMessage
@@ -412,6 +430,7 @@ export class McSession extends EventEmitter {
     this.clearConfigurationRestartWatchdog();
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
+    this.stopPlayerListSync();
     const bot = this.bot;
     this.bot = null;
     if (bot) {
@@ -432,6 +451,7 @@ export class McSession extends EventEmitter {
     this.clearConfigurationRestartWatchdog();
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
+    this.stopPlayerListSync();
     this.connected = false;
     const bot = this.bot;
     this.bot = null;
@@ -483,6 +503,47 @@ export class McSession extends EventEmitter {
       ign: this.bot.username,
       playersOnline: Object.keys(this.bot.players ?? {}).length,
     });
+    this.emitPlayerList();
+  }
+
+  private startPlayerListSync(): void {
+    this.stopPlayerListSync();
+    this.emitPlayerList();
+    this.playerListTimer = setInterval(() => {
+      this.emitPlayerList();
+    }, 10_000);
+  }
+
+  private stopPlayerListSync(): void {
+    if (!this.playerListTimer) return;
+    clearInterval(this.playerListTimer);
+    this.playerListTimer = null;
+    this.lastPlayerListSignature = "";
+  }
+
+  private emitPlayerList(force = false): void {
+    const msg = this.playerListSnapshot();
+    if (!msg) return;
+    const signature = JSON.stringify(msg.players.map((player) => [
+      player.name,
+      player.uuid ?? "",
+      player.displayName ?? "",
+      player.ping ?? "",
+    ]));
+    if (!force && signature === this.lastPlayerListSignature) return;
+    this.lastPlayerListSignature = signature;
+    this.emitMsg(msg);
+  }
+
+  playerListSnapshot(): PlayerListMessage | null {
+    if (!this.bot || !this.connected) return null;
+    const players = serializePlayerList(this.bot);
+    return {
+      type: "player_list",
+      playersOnline: players.length,
+      players,
+      ts: Date.now(),
+    };
   }
 
   private playerUuid(username: string): string | undefined {
@@ -565,6 +626,39 @@ function normalizeCompletions(matches: unknown[] | undefined): CompletionMatch[]
     if (normalized.length >= 24) break;
   }
   return normalized;
+}
+
+function serializePlayerList(bot: Bot): PlayerSummary[] {
+  const players = Object.entries(bot.players ?? {})
+    .map(([key, player]) => {
+      const normalized = player as {
+        username?: unknown;
+        uuid?: unknown;
+        displayName?: unknown;
+        ping?: unknown;
+      };
+      const name =
+        typeof normalized.username === "string" && normalized.username.trim()
+          ? normalized.username.trim()
+          : key;
+      const uuid = typeof normalized.uuid === "string" ? normalized.uuid : undefined;
+      const displayName = componentPlainText(normalized.displayName);
+      const ping = typeof normalized.ping === "number" ? normalized.ping : undefined;
+      return {
+        name,
+        uuid,
+        displayName: displayName && displayName !== name ? displayName : undefined,
+        ping,
+      };
+    })
+    .filter((player) => player.name)
+    .sort((a, b) => {
+      if (a.name === bot.username) return -1;
+      if (b.name === bot.username) return 1;
+      return a.name.localeCompare(b.name, "en");
+    });
+
+  return players.slice(0, 200);
 }
 
 function serializeWindow(window: Window): GuiWindow {
