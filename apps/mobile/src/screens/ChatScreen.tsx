@@ -8,6 +8,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -1017,6 +1018,7 @@ function GuiWindowModal({
             data={visibleSlots}
             keyExtractor={(slot) => `${gui.id}-${slot.index}`}
             numColumns={9}
+            style={styles.guiGridList}
             contentContainerStyle={styles.guiGrid}
             renderItem={({ item }) => (
               <GuiSlotCell
@@ -1030,7 +1032,11 @@ function GuiWindowModal({
 
           <View style={styles.guiDetailCard}>
             {selectedItem ? (
-              <>
+              <ScrollView
+                style={styles.guiDetailScroll}
+                contentContainerStyle={styles.guiDetailScrollContent}
+                nestedScrollEnabled
+              >
                 <Text style={styles.guiDetailName} numberOfLines={2}>
                   {itemLabel(selectedItem)}
                 </Text>
@@ -1039,27 +1045,21 @@ function GuiWindowModal({
                 </Text>
                 {selectedItem.lore?.length ? (
                   <View style={styles.guiLoreList}>
-                    {selectedItem.lore.slice(0, 8).map((line, index) => (
+                    {selectedItem.lore.map((line, index) => (
                       <Text
                         key={`${selectedItem.name}-${index}-${line}`}
                         style={styles.guiLoreText}
-                        numberOfLines={2}
                       >
                         {line}
                       </Text>
                     ))}
-                    {selectedItem.lore.length > 8 ? (
-                      <Text style={styles.guiLoreMore}>
-                        +{selectedItem.lore.length - 8} lines
-                      </Text>
-                    ) : null}
                   </View>
                 ) : (
                   <Text style={styles.guiLoreEmpty}>표시할 로어 없음</Text>
                 )}
-              </>
+              </ScrollView>
             ) : (
-              <Text style={styles.guiLoreEmpty}>
+              <Text style={[styles.guiLoreEmpty, styles.guiDetailEmpty]}>
                 {selectedSlot ? `빈 슬롯 ${selectedSlot.index}` : "슬롯을 선택하면 이름과 로어가 표시됩니다"}
               </Text>
             )}
@@ -1265,6 +1265,14 @@ function shortItemLabel(item: GuiItem): string {
 }
 
 function itemColor(name: string): string {
+  const normalized = name.replace(/^minecraft:/, "").toLowerCase();
+  const colorMatch = ITEM_COLOR_PREFIXES.find(({ prefix }) => normalized.startsWith(prefix));
+  if (colorMatch && COLORABLE_ITEM_RE.test(normalized)) {
+    return colorMatch.color;
+  }
+  const materialMatch = ITEM_MATERIAL_COLORS.find(({ test }) => test.test(normalized));
+  if (materialMatch) return materialMatch.color;
+
   let hash = 0;
   for (let i = 0; i < name.length; i += 1) {
     hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
@@ -1280,6 +1288,43 @@ function itemColor(name: string): string {
   ];
   return colors[hash % colors.length];
 }
+
+const ITEM_COLOR_PREFIXES = [
+  { prefix: "white_", color: "#f0f0ec" },
+  { prefix: "orange_", color: "#f9801d" },
+  { prefix: "magenta_", color: "#c74ebd" },
+  { prefix: "light_blue_", color: "#3ab3da" },
+  { prefix: "yellow_", color: "#fed83d" },
+  { prefix: "lime_", color: "#80c71f" },
+  { prefix: "pink_", color: "#f38baa" },
+  { prefix: "gray_", color: "#474f52" },
+  { prefix: "light_gray_", color: "#9d9d97" },
+  { prefix: "cyan_", color: "#169c9c" },
+  { prefix: "purple_", color: "#8932b8" },
+  { prefix: "blue_", color: "#3c44aa" },
+  { prefix: "brown_", color: "#835432" },
+  { prefix: "green_", color: "#5e7c16" },
+  { prefix: "red_", color: "#b02e26" },
+  { prefix: "black_", color: "#1d1d21" },
+] as const;
+
+const COLORABLE_ITEM_RE =
+  /(stained_glass|stained_glass_pane|wool|carpet|concrete|concrete_powder|terracotta|glazed_terracotta|banner|bed|candle|shulker_box|dye)$/;
+
+const ITEM_MATERIAL_COLORS = [
+  { test: /end_crystal/, color: "#9b6dff" },
+  { test: /player_head|player_wall_head/, color: "#d9b18c" },
+  { test: /barrier|tnt|fire_charge|lava_bucket/, color: "#f85149" },
+  { test: /emerald|slime|experience_bottle/, color: "#3fb950" },
+  { test: /diamond|prismarine|heart_of_the_sea/, color: "#56d4dd" },
+  { test: /gold|honey|glowstone|totem/, color: "#f2cc60" },
+  { test: /iron|quartz|bone|paper|map/, color: "#c9d1d9" },
+  { test: /redstone|nether_wart|ruby/, color: "#db3b32" },
+  { test: /lapis|water_bucket/, color: "#4f8cff" },
+  { test: /amethyst|chorus|dragon/, color: "#a371f7" },
+  { test: /netherite|obsidian|blackstone|coal/, color: "#30363d" },
+  { test: /book|chest|barrel|oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|bamboo/, color: "#a76b3f" },
+] as const;
 
 const styles = StyleSheet.create({
   root: {
@@ -1626,7 +1671,7 @@ const styles = StyleSheet.create({
   guiPanel: {
     width: "100%",
     maxWidth: 760,
-    maxHeight: "82%",
+    height: "82%",
     backgroundColor: "rgba(13, 17, 23, 0.96)",
     borderColor: theme.glassBorder,
     borderWidth: 1,
@@ -1670,6 +1715,9 @@ const styles = StyleSheet.create({
     fontSize: 24,
     lineHeight: 27,
     fontWeight: "800",
+  },
+  guiGridList: {
+    flexShrink: 1,
   },
   guiGrid: {
     alignItems: "center",
@@ -1731,13 +1779,23 @@ const styles = StyleSheet.create({
   guiDetailCard: {
     marginHorizontal: 16,
     marginBottom: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
     borderRadius: 14,
     borderColor: theme.glassBorder,
     borderWidth: 1,
     backgroundColor: "rgba(13, 17, 23, 0.76)",
-    minHeight: 64,
+    height: 128,
+    overflow: "hidden",
+  },
+  guiDetailScroll: {
+    flex: 1,
+  },
+  guiDetailScrollContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  guiDetailEmpty: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   guiDetailName: {
     color: theme.text,
@@ -1782,12 +1840,6 @@ const styles = StyleSheet.create({
     color: theme.textDim,
     fontSize: 12,
     lineHeight: 16,
-  },
-  guiLoreMore: {
-    color: theme.accent,
-    fontSize: 11,
-    fontWeight: "800",
-    marginTop: 2,
   },
   guiLoreEmpty: {
     color: theme.textDim,

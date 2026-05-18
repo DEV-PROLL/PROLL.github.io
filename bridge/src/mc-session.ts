@@ -246,6 +246,7 @@ export class McSession extends EventEmitter {
     });
 
     client.on("start_configuration", () => {
+      this.clearBossBars();
       this.emitMsg({
         type: "system",
         text: "Server requested configuration restart.",
@@ -282,6 +283,7 @@ export class McSession extends EventEmitter {
     client.on("transfer", (packet: { host?: string; port?: number }) => {
       const host = packet.host ?? "unknown";
       const port = packet.port ?? 25565;
+      this.clearBossBars();
       this.emitMsg({
         type: "system",
         text: `Server requested transfer to ${host}:${port}.`,
@@ -566,6 +568,15 @@ export class McSession extends EventEmitter {
     if (!force && signature === this.lastBossBarsSignature) return;
     this.lastBossBarsSignature = signature;
     this.emitMsg(msg);
+  }
+
+  private clearBossBars(): void {
+    this.lastBossBarsSignature = "[]";
+    this.emitMsg({
+      type: "boss_bars",
+      bars: [],
+      ts: Date.now(),
+    });
   }
 
   bossBarsSnapshot(): BossBarsMessage | null {
