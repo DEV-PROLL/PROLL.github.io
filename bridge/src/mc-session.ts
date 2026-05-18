@@ -604,7 +604,7 @@ export class McSession extends EventEmitter {
 
   private currentBossBars(filterSuppressed = true): BossBarSummary[] {
     if (!this.bot) return [];
-    const bars = serializeBossBars(this.bot);
+    const bars = serializeBossBars(this.bot).filter((bar) => !isTransientLimboBossBar(bar));
     if (!filterSuppressed || this.suppressedBossBarIds.size === 0) return bars;
     return bars.filter((bar) => !this.suppressedBossBarIds.has(bar.id));
   }
@@ -730,6 +730,15 @@ function serializeBossBars(bot: Bot): BossBarSummary[] {
     .map((bar) => serializeBossBar(bar))
     .filter((bar): bar is BossBarSummary => Boolean(bar));
   return bars.slice(0, 6);
+}
+
+function isTransientLimboBossBar(bar: BossBarSummary): boolean {
+  const normalizedTitle = bar.title.replace(/\s/g, "").toLowerCase();
+  return (
+    normalizedTitle.includes("접속대기중") ||
+    normalizedTitle.includes("connecting") ||
+    normalizedTitle.includes("limbo")
+  );
 }
 
 function bossBarValues(source: unknown): unknown[] {
