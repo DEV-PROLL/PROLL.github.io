@@ -110,8 +110,8 @@ export function startWsServer(
     });
   });
 
-  httpServer.listen(cfg.wsPort, () => {
-    console.log(`[bridge] WS+HTTP listening on :${cfg.wsPort}`);
+  httpServer.listen(cfg.wsPort, cfg.bindHost, () => {
+    console.log(`[bridge] WS+HTTP listening on ${cfg.bindHost}:${cfg.wsPort}`);
   });
 
   return httpServer;

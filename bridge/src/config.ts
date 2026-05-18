@@ -24,6 +24,7 @@ export function loadConfig(): BridgeConfig {
     mcHost: str("MC_HOST"),
     mcPort: num("MC_PORT", 25565),
     mcVersion: str("MC_VERSION", "1.21.11"),
+    bindHost: str("BIND_HOST", "127.0.0.1"),
     wsPort: num("WS_PORT", 8080),
     bridgeToken: process.env.BRIDGE_TOKEN?.trim() || null,
     tokensDir: path.resolve(str("TOKENS_DIR", "./tokens")),

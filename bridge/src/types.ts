@@ -103,6 +103,7 @@ export interface BridgeConfig {
   mcHost: string;
   mcPort: number;
   mcVersion: string;
+  bindHost: string;
   wsPort: number;
   bridgeToken: string | null;
   tokensDir: string;
