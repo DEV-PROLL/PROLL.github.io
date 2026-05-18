@@ -16,6 +16,7 @@ import {
 import * as Clipboard from "expo-clipboard";
 import { theme } from "../theme";
 import type {
+  BossBarSummary,
   ChatSegment,
   CompletionMatch,
   GuiItem,
@@ -68,6 +69,7 @@ export function ChatScreen({
   const [completionMatches, setCompletionMatches] = useState<CompletionMatch[]>([]);
   const [playerList, setPlayerList] = useState<PlayerSummary[]>([]);
   const [playerListOpen, setPlayerListOpen] = useState(false);
+  const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
   const [serverInfo, setServerInfo] = useState<{
     server?: string;
     online?: number;
@@ -142,6 +144,7 @@ export function ChatScreen({
             setSelectedWindowSlot(null);
             setPendingSlot(null);
             setPlayerList([]);
+            setBossBars([]);
           }
           if (msg.connected) {
             autoReconnectAttemptRef.current = 0;
@@ -172,6 +175,9 @@ export function ChatScreen({
             ...prev,
             online: msg.playersOnline,
           }));
+          break;
+        case "boss_bars":
+          setBossBars(msg.bars);
           break;
         case "completion":
           if (
@@ -212,6 +218,7 @@ export function ChatScreen({
           setSelectedWindowSlot(null);
           setPendingSlot(null);
           setPlayerList([]);
+          setBossBars([]);
           setMessages((prev) => [
             ...prev,
             {
@@ -583,6 +590,8 @@ export function ChatScreen({
           </View>
         </View>
 
+        {bossBars.length > 0 ? <BossBarStack bars={bossBars} /> : null}
+
         {state === "open" && !serverInfo.connected && serverInfo.phase !== "joining" && (
           <View style={styles.reconnectBanner}>
             <Text style={styles.reconnectBannerText}>
@@ -739,6 +748,54 @@ function openExternalUrl(url: string) {
   void Linking.openURL(trimmed).catch(() => {
     Alert.alert("Open link failed", trimmed);
   });
+}
+
+function BossBarStack({ bars }: { bars: BossBarSummary[] }) {
+  return (
+    <View style={styles.bossBarStack}>
+      {bars.slice(0, 3).map((bar) => (
+        <View key={bar.id} style={styles.bossBarRow}>
+          <View style={styles.bossBarHeader}>
+            <Text style={styles.bossBarTitle} numberOfLines={1}>
+              {bar.title}
+            </Text>
+            <Text style={styles.bossBarPct}>{Math.round(bar.health * 100)}%</Text>
+          </View>
+          <View style={styles.bossBarTrack}>
+            <View
+              style={[
+                styles.bossBarFill,
+                {
+                  width: `${Math.max(2, Math.round(bar.health * 100))}%`,
+                  backgroundColor: bossBarColor(bar.color),
+                },
+              ]}
+            />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function bossBarColor(color: string): string {
+  switch (color) {
+    case "pink":
+      return "#ff7ad9";
+    case "blue":
+      return "#58a6ff";
+    case "red":
+      return "#f85149";
+    case "green":
+      return theme.accent;
+    case "yellow":
+      return "#f2cc60";
+    case "white":
+      return "#f0f6fc";
+    case "purple":
+    default:
+      return "#a371f7";
+  }
 }
 
 function Row({
@@ -1361,6 +1418,44 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 12,
     fontWeight: "800",
+  },
+  bossBarStack: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    gap: 7,
+    backgroundColor: "rgba(13, 17, 23, 0.92)",
+    borderBottomColor: theme.glassBorder,
+    borderBottomWidth: 1,
+  },
+  bossBarRow: {
+    gap: 4,
+  },
+  bossBarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  bossBarTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  bossBarPct: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  bossBarTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+    backgroundColor: "rgba(240, 246, 252, 0.12)",
+  },
+  bossBarFill: {
+    height: "100%",
+    borderRadius: 3,
   },
   list: {
     paddingHorizontal: 18,

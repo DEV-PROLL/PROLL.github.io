@@ -5,6 +5,7 @@ import type { Item } from "prismarine-item";
 import type { Window } from "prismarine-windows";
 import { normalizeAuthError } from "./auth";
 import type {
+  BossBarSummary,
   CompletionMatch,
   GuiItem,
   GuiWindow,
@@ -20,6 +21,7 @@ import {
 } from "./chat-format";
 
 type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
+type BossBarsMessage = Extract<ServerMessage, { type: "boss_bars" }>;
 
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
 const debuggedGuiItems = new Set<string>();
@@ -65,6 +67,7 @@ export class McSession extends EventEmitter {
   private currentGuiWindowListener: ((...args: unknown[]) => void) | null = null;
   private playerListTimer: NodeJS.Timeout | null = null;
   private lastPlayerListSignature = "";
+  private lastBossBarsSignature = "";
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
@@ -147,6 +150,13 @@ export class McSession extends EventEmitter {
     bot.on("playerJoined", emitPlayersSoon);
     bot.on("playerLeft", emitPlayersSoon);
     bot.on("playerUpdated", emitPlayersSoon);
+
+    const emitBossBarsSoon = () => {
+      setTimeout(() => this.emitBossBars(), 0);
+    };
+    bot.on("bossBarCreated", emitBossBarsSoon);
+    bot.on("bossBarUpdated", emitBossBarsSoon);
+    bot.on("bossBarDeleted", emitBossBarsSoon);
 
     // `messagestr` is mineflayer's "any chat-like message" event including
     // system messages, deaths, joins, leaves. Use the underlying ChatMessage
@@ -431,6 +441,7 @@ export class McSession extends EventEmitter {
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
     this.stopPlayerListSync();
+    this.lastBossBarsSignature = "";
     const bot = this.bot;
     this.bot = null;
     if (bot) {
@@ -452,6 +463,7 @@ export class McSession extends EventEmitter {
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
     this.stopPlayerListSync();
+    this.lastBossBarsSignature = "";
     this.connected = false;
     const bot = this.bot;
     this.bot = null;
@@ -504,6 +516,7 @@ export class McSession extends EventEmitter {
       playersOnline: Object.keys(this.bot.players ?? {}).length,
     });
     this.emitPlayerList();
+    this.emitBossBars();
   }
 
   private startPlayerListSync(): void {
@@ -542,6 +555,24 @@ export class McSession extends EventEmitter {
       type: "player_list",
       playersOnline: players.length,
       players,
+      ts: Date.now(),
+    };
+  }
+
+  private emitBossBars(force = false): void {
+    const msg = this.bossBarsSnapshot();
+    if (!msg) return;
+    const signature = JSON.stringify(msg.bars);
+    if (!force && signature === this.lastBossBarsSignature) return;
+    this.lastBossBarsSignature = signature;
+    this.emitMsg(msg);
+  }
+
+  bossBarsSnapshot(): BossBarsMessage | null {
+    if (!this.bot || !this.connected) return null;
+    return {
+      type: "boss_bars",
+      bars: serializeBossBars(this.bot),
       ts: Date.now(),
     };
   }
@@ -659,6 +690,51 @@ function serializePlayerList(bot: Bot): PlayerSummary[] {
     });
 
   return players.slice(0, 200);
+}
+
+function serializeBossBars(bot: Bot): BossBarSummary[] {
+  const source = (bot as unknown as { bossBars?: unknown }).bossBars;
+  const bars = bossBarValues(source)
+    .map((bar) => serializeBossBar(bar))
+    .filter((bar): bar is BossBarSummary => Boolean(bar));
+  return bars.slice(0, 6);
+}
+
+function bossBarValues(source: unknown): unknown[] {
+  if (!source) return [];
+  if (source instanceof Map) return [...source.values()];
+  if (Array.isArray(source)) return source;
+  if (typeof source === "object") return Object.values(source as Record<string, unknown>);
+  return [];
+}
+
+function serializeBossBar(bar: unknown): BossBarSummary | null {
+  if (!bar || typeof bar !== "object") return null;
+  const obj = bar as {
+    entityUUID?: unknown;
+    title?: unknown;
+    health?: unknown;
+    color?: unknown;
+    dividers?: unknown;
+  };
+  const id = typeof obj.entityUUID === "string" ? obj.entityUUID : undefined;
+  if (!id) return null;
+  return {
+    id,
+    title: bossBarTitle(obj.title),
+    health: clamp01(typeof obj.health === "number" ? obj.health : 0),
+    color: typeof obj.color === "string" ? obj.color : "purple",
+    dividers: typeof obj.dividers === "number" ? obj.dividers : undefined,
+  };
+}
+
+function bossBarTitle(title: unknown): string {
+  return componentPlainText(title) || plainText(title as never) || "Boss Bar";
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 function serializeWindow(window: Window): GuiWindow {

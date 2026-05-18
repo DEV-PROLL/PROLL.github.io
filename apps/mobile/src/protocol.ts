@@ -51,6 +51,11 @@ export type ServerMessage =
       ts: number;
     }
   | {
+      type: "boss_bars";
+      bars: BossBarSummary[];
+      ts: number;
+    }
+  | {
       type: "window_open" | "window_update";
       window: GuiWindow;
     }
@@ -83,6 +88,14 @@ export interface PlayerSummary {
   uuid?: string;
   displayName?: string;
   ping?: number;
+}
+
+export interface BossBarSummary {
+  id: string;
+  title: string;
+  health: number;
+  color: string;
+  dividers?: number;
 }
 
 export interface GuiWindow {
