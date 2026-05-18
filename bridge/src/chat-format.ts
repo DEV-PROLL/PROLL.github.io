@@ -88,6 +88,21 @@ const MINI_COLOR_ALIASES: Record<string, string> = {
 
 const VANILLA_LANGUAGE = loadVanillaLanguage();
 
+const NBT_TAG_TYPES = new Set([
+  "byte",
+  "short",
+  "int",
+  "long",
+  "float",
+  "double",
+  "string",
+  "list",
+  "compound",
+  "byteArray",
+  "intArray",
+  "longArray",
+]);
+
 const TRANSLATIONS: Record<string, string> = {
   "chat.type.text": "<%1$s> %2$s",
   "chat.type.announcement": "[%1$s] %2$s",
@@ -174,6 +189,7 @@ export function extractSender(msg: AnyChatMessage | string | undefined | null): 
 }
 
 function flattenComponent(value: unknown, inherited: SegmentStyle): ChatSegment[] {
+  value = simplifyComponentNbt(value);
   if (value == null) return [];
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return [{ ...inherited, text: replaceBrokenGlyphs(String(value)) }];
@@ -231,16 +247,12 @@ function inheritStyle(component: {
   return {
     ...inherited,
     color: normalizeColor(component.color) ?? inherited.color,
-    bold: typeof component.bold === "boolean" ? component.bold : inherited.bold,
-    italic: typeof component.italic === "boolean" ? component.italic : inherited.italic,
+    bold: styleFlag(component.bold) ?? inherited.bold,
+    italic: styleFlag(component.italic) ?? inherited.italic,
     underlined:
-      typeof component.underlined === "boolean"
-        ? component.underlined
-        : inherited.underlined,
+      styleFlag(component.underlined) ?? inherited.underlined,
     strikethrough:
-      typeof component.strikethrough === "boolean"
-        ? component.strikethrough
-        : inherited.strikethrough,
+      styleFlag(component.strikethrough) ?? inherited.strikethrough,
     clickEvent:
       normalizeClickEvent(component.clickEvent ?? component.click_event) ??
       inherited.clickEvent,
@@ -322,15 +334,52 @@ function applyTranslationTemplate(
 }
 
 function parseTextComponent(value: unknown): unknown {
+  if (value != null && typeof value === "object") return simplifyComponentNbt(value);
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
   if (!trimmed) return "";
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
   try {
-    return JSON.parse(trimmed);
+    return simplifyComponentNbt(JSON.parse(trimmed));
   } catch {
     return value;
   }
+}
+
+function simplifyComponentNbt(value: unknown): unknown {
+  if (value == null) return value;
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => simplifyComponentNbt(entry));
+  }
+  if (typeof value !== "object") return value;
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.type === "string" &&
+    NBT_TAG_TYPES.has(record.type) &&
+    "value" in record
+  ) {
+    return simplifyComponentNbt(record.value);
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    out[key] = simplifyComponentNbt(entry);
+  }
+  return out;
+}
+
+function styleFlag(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  return undefined;
 }
 
 function normalizeColor(value: unknown): string | undefined {
