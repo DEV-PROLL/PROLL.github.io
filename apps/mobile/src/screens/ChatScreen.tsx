@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import type { NativeSyntheticEvent, TextInputKeyPressEventData } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { theme } from "../theme";
 import type {
@@ -49,10 +50,29 @@ interface DisplayedMessage {
   ts: number;
 }
 
+interface ActionBarState {
+  text: string;
+  segments?: ChatSegment[];
+  ts: number;
+}
+
+interface TitleOverlayState {
+  title?: string;
+  subtitle?: string;
+  ts: number;
+}
+
+interface TitleTimingState {
+  fadeIn: number;
+  stay: number;
+  fadeOut: number;
+}
+
 let messageCounter = 0;
 const newId = () => `m-${++messageCounter}-${Date.now()}`;
 const MAX_INPUT_HISTORY = 50;
 const MAX_AUTO_RECONNECTS = 6;
+const DEFAULT_TITLE_TIMING: TitleTimingState = { fadeIn: 10, stay: 70, fadeOut: 20 };
 
 export function ChatScreen({
   bridgeUrl,
@@ -71,6 +91,8 @@ export function ChatScreen({
   const [playerList, setPlayerList] = useState<PlayerSummary[]>([]);
   const [playerListOpen, setPlayerListOpen] = useState(false);
   const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
+  const [actionBar, setActionBar] = useState<ActionBarState | null>(null);
+  const [titleOverlay, setTitleOverlay] = useState<TitleOverlayState | null>(null);
   const [serverInfo, setServerInfo] = useState<{
     server?: string;
     online?: number;
@@ -88,6 +110,9 @@ export function ChatScreen({
   const textInputRef = useRef<TextInput>(null);
   const historyDraftRef = useRef("");
   const autoReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const actionBarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleTimingRef = useRef<TitleTimingState>(DEFAULT_TITLE_TIMING);
   const autoReconnectAttemptRef = useRef(0);
   const lastAuthAttemptAtRef = useRef(0);
 
@@ -109,6 +134,24 @@ export function ChatScreen({
       autoReconnectTimerRef.current = null;
     }
   }, []);
+
+  const clearOverlayTimers = useCallback(() => {
+    if (actionBarTimerRef.current) {
+      clearTimeout(actionBarTimerRef.current);
+      actionBarTimerRef.current = null;
+    }
+    if (titleTimerRef.current) {
+      clearTimeout(titleTimerRef.current);
+      titleTimerRef.current = null;
+    }
+  }, []);
+
+  const clearTransientOverlays = useCallback(() => {
+    clearOverlayTimers();
+    setActionBar(null);
+    setTitleOverlay(null);
+    titleTimingRef.current = DEFAULT_TITLE_TIMING;
+  }, [clearOverlayTimers]);
 
   const handleMessage = useCallback(
     (msg: ServerMessage) => {
@@ -146,6 +189,7 @@ export function ChatScreen({
             setPendingSlot(null);
             setPlayerList([]);
             setBossBars([]);
+            clearTransientOverlays();
           }
           if (msg.connected) {
             autoReconnectAttemptRef.current = 0;
@@ -179,6 +223,42 @@ export function ChatScreen({
           break;
         case "boss_bars":
           setBossBars(msg.bars);
+          break;
+        case "action_bar":
+          setActionBar({ text: msg.text, segments: msg.segments, ts: msg.ts });
+          if (actionBarTimerRef.current) clearTimeout(actionBarTimerRef.current);
+          actionBarTimerRef.current = setTimeout(() => {
+            setActionBar(null);
+            actionBarTimerRef.current = null;
+          }, 3500);
+          break;
+        case "title":
+          if (msg.event === "times") {
+            titleTimingRef.current = {
+              fadeIn: msg.fadeIn,
+              stay: msg.stay,
+              fadeOut: msg.fadeOut,
+            };
+            break;
+          }
+          if (msg.event === "clear") {
+            if (titleTimerRef.current) {
+              clearTimeout(titleTimerRef.current);
+              titleTimerRef.current = null;
+            }
+            setTitleOverlay(null);
+            break;
+          }
+          setTitleOverlay((prev) => ({
+            ...prev,
+            [msg.part]: msg.text,
+            ts: msg.ts,
+          }));
+          if (titleTimerRef.current) clearTimeout(titleTimerRef.current);
+          titleTimerRef.current = setTimeout(() => {
+            setTitleOverlay(null);
+            titleTimerRef.current = null;
+          }, titleStayMs(titleTimingRef.current));
           break;
         case "completion":
           if (
@@ -220,6 +300,7 @@ export function ChatScreen({
           setPendingSlot(null);
           setPlayerList([]);
           setBossBars([]);
+          clearTransientOverlays();
           setMessages((prev) => [
             ...prev,
             {
@@ -255,6 +336,7 @@ export function ChatScreen({
           setActiveWindow(null);
           setSelectedWindowSlot(null);
           setPendingSlot(null);
+          clearTransientOverlays();
           setServerInfo((prev) => ({
             ...prev,
             connected: false,
@@ -287,7 +369,7 @@ export function ChatScreen({
           break;
       }
     },
-    [clearAutoReconnectTimer, onLogout, userId],
+    [clearAutoReconnectTimer, clearTransientOverlays, onLogout, userId],
   );
 
   const { state, send } = useBridge(bridgeUrl, true, handleMessage);
@@ -303,6 +385,7 @@ export function ChatScreen({
       setActiveWindow(null);
       setSelectedWindowSlot(null);
       setPendingSlot(null);
+      clearTransientOverlays();
       setServerInfo((prev) => ({
         ...prev,
         connected: false,
@@ -320,14 +403,20 @@ export function ChatScreen({
       }
       return ok;
     },
-    [clearAutoReconnectTimer, mcVersion, send, state, userId],
+    [clearAutoReconnectTimer, clearTransientOverlays, mcVersion, send, state, userId],
   );
 
   useEffect(() => {
     scrollToBottom(true);
   }, [messages.length, completionMatches.length, scrollToBottom]);
 
-  useEffect(() => () => clearAutoReconnectTimer(), [clearAutoReconnectTimer]);
+  useEffect(
+    () => () => {
+      clearAutoReconnectTimer();
+      clearOverlayTimers();
+    },
+    [clearAutoReconnectTimer, clearOverlayTimers],
+  );
 
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", () => scrollToBottom(false));
@@ -453,6 +542,20 @@ export function ChatScreen({
       setInput(inputHistory[next]);
       return next;
     });
+  };
+
+  const handleInputKeyPress = (
+    event: NativeSyntheticEvent<TextInputKeyPressEventData>,
+  ) => {
+    if (event.nativeEvent.key === "ArrowUp") {
+      event.preventDefault?.();
+      showPreviousInput();
+      return;
+    }
+    if (event.nativeEvent.key === "ArrowDown") {
+      event.preventDefault?.();
+      showNextInput();
+    }
   };
 
   const handleCompletionPress = (match: CompletionMatch) => {
@@ -592,6 +695,14 @@ export function ChatScreen({
         </View>
 
         {bossBars.length > 0 ? <BossBarStack bars={bossBars} /> : null}
+        {titleOverlay ? <TitleOverlay overlay={titleOverlay} /> : null}
+        {actionBar ? (
+          <ActionBarOverlay
+            actionBar={actionBar}
+            onSegmentClick={handleSegmentClick}
+            onSegmentHover={handleSegmentHover}
+          />
+        ) : null}
 
         {state === "open" && !serverInfo.connected && serverInfo.phase !== "joining" && (
           <View style={styles.reconnectBanner}>
@@ -683,6 +794,7 @@ export function ChatScreen({
             autoCapitalize="none"
             returnKeyType="send"
             onSubmitEditing={handleSend}
+            onKeyPress={handleInputKeyPress}
             blurOnSubmit={false}
             editable={serverInfo.connected}
           />
@@ -777,6 +889,52 @@ function BossBarStack({ bars }: { bars: BossBarSummary[] }) {
       ))}
     </View>
   );
+}
+
+function ActionBarOverlay({
+  actionBar,
+  onSegmentClick,
+  onSegmentHover,
+}: {
+  actionBar: ActionBarState;
+  onSegmentClick: (segment: ChatSegment) => void;
+  onSegmentHover: (segment: ChatSegment) => void;
+}) {
+  return (
+    <View pointerEvents="box-none" style={styles.actionBarOverlay}>
+      <View style={styles.actionBarBubble}>
+        <RichText
+          text={actionBar.text}
+          segments={actionBar.segments}
+          style={styles.actionBarText}
+          onSegmentClick={onSegmentClick}
+          onSegmentHover={onSegmentHover}
+        />
+      </View>
+    </View>
+  );
+}
+
+function TitleOverlay({ overlay }: { overlay: TitleOverlayState }) {
+  return (
+    <View pointerEvents="none" style={styles.titleOverlay}>
+      {overlay.title ? (
+        <Text style={styles.titleOverlayText} numberOfLines={2}>
+          {overlay.title}
+        </Text>
+      ) : null}
+      {overlay.subtitle ? (
+        <Text style={styles.titleOverlaySubtext} numberOfLines={2}>
+          {overlay.subtitle}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function titleStayMs(timing: TitleTimingState): number {
+  const stayTicks = Number.isFinite(timing.stay) && timing.stay > 0 ? timing.stay : 70;
+  return Math.max(1500, Math.min(12000, stayTicks * 50));
 }
 
 function bossBarColor(color: string): string {
@@ -1336,6 +1494,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: "100%",
     maxWidth: 780,
+    position: "relative",
     backgroundColor: theme.bg,
     borderLeftColor: theme.glassBorder,
     borderLeftWidth: 1,
@@ -1501,6 +1660,59 @@ const styles = StyleSheet.create({
   bossBarFill: {
     height: "100%",
     borderRadius: 3,
+  },
+  titleOverlay: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    top: "34%",
+    zIndex: 8,
+    alignItems: "center",
+    gap: 7,
+  },
+  titleOverlayText: {
+    color: theme.text,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: "900",
+    textAlign: "center",
+    textShadowColor: "rgba(0, 0, 0, 0.85)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  titleOverlaySubtext: {
+    color: theme.text,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "800",
+    textAlign: "center",
+    textShadowColor: "rgba(0, 0, 0, 0.85)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  actionBarOverlay: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: 84,
+    zIndex: 9,
+    alignItems: "center",
+  },
+  actionBarBubble: {
+    maxWidth: "100%",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+    backgroundColor: "rgba(13, 17, 23, 0.82)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+  },
+  actionBarText: {
+    color: theme.text,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "900",
+    textAlign: "center",
   },
   list: {
     paddingHorizontal: 18,

@@ -40,6 +40,29 @@ export type ServerMessage =
     }
   | { type: "system"; text: string; ts: number; segments?: ChatSegment[]; rawJson?: unknown }
   | {
+      type: "action_bar";
+      text: string;
+      ts: number;
+      segments?: ChatSegment[];
+      rawJson?: unknown;
+    }
+  | {
+      type: "title";
+      event: "text";
+      part: "title" | "subtitle";
+      text: string;
+      ts: number;
+    }
+  | {
+      type: "title";
+      event: "times";
+      fadeIn: number;
+      stay: number;
+      fadeOut: number;
+      ts: number;
+    }
+  | { type: "title"; event: "clear"; ts: number }
+  | {
       type: "completion";
       requestId: string;
       text: string;

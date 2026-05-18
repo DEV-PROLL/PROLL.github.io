@@ -109,6 +109,7 @@ export class McSession extends EventEmitter {
       },
     });
     this.bot = bot;
+    this.disableUnusedSimulation(bot);
     this.patchClientSettingsWrite(bot);
     this.wireEvents(bot);
     this.wireProtocolCompat(bot);
@@ -134,8 +135,16 @@ export class McSession extends EventEmitter {
     };
   }
 
+  private disableUnusedSimulation(bot: Bot): void {
+    // Chat/command control does not need client-side physics ticks. Keeping
+    // them off lowers idle CPU on the Mac mini bridge without affecting chat,
+    // tab completion, GUI clicks, or anti-AFK look packets.
+    (bot as unknown as { physicsEnabled?: boolean }).physicsEnabled = false;
+  }
+
   private wireEvents(bot: Bot): void {
     bot.once("spawn", () => {
+      this.disableUnusedSimulation(bot);
       const ign = bot.username;
       const uuid = (bot as unknown as { uuid?: string }).uuid ?? "";
       console.info(`[mc-session] spawned ign=${ign} mc=${this.opts.version}`);
@@ -167,6 +176,49 @@ export class McSession extends EventEmitter {
       setTimeout(() => this.emitBossBars(), 0);
     });
 
+    bot.on("actionBar", (jsonMsg: unknown) => {
+      const text = plainText(jsonMsg as never);
+      if (!text.trim()) return;
+      this.emitMsg({
+        type: "action_bar",
+        text,
+        ts: Date.now(),
+        segments: richSegments(jsonMsg as never),
+        rawJson: rawJson(jsonMsg as never),
+      });
+    });
+
+    bot.on("title", (text: string, type: "title" | "subtitle") => {
+      const normalized = String(text ?? "").trim();
+      if (!normalized) return;
+      this.emitMsg({
+        type: "title",
+        event: "text",
+        part: type,
+        text: normalized,
+        ts: Date.now(),
+      });
+    });
+
+    (bot as unknown as EventEmitter).on("title_times", (fadeIn: number, stay: number, fadeOut: number) => {
+      this.emitMsg({
+        type: "title",
+        event: "times",
+        fadeIn,
+        stay,
+        fadeOut,
+        ts: Date.now(),
+      });
+    });
+
+    (bot as unknown as EventEmitter).on("title_clear", () => {
+      this.emitMsg({
+        type: "title",
+        event: "clear",
+        ts: Date.now(),
+      });
+    });
+
     // `messagestr` is mineflayer's "any chat-like message" event including
     // system messages, deaths, joins, leaves. Use the underlying ChatMessage
     // (3rd arg) for sender extraction and JSON.
@@ -174,10 +226,11 @@ export class McSession extends EventEmitter {
       "messagestr",
       (
         text: string,
-        _position: string,
+        position: string,
         jsonMsg: unknown,
       ) => {
         this.markConnected();
+        if (position === "game_info") return;
         const sender = extractSender(jsonMsg as never);
         if (sender) {
           this.emitMsg({
