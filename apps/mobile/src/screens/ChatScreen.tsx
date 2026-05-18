@@ -753,9 +753,7 @@ function RichText({
         return (
           <Text
             key={`${index}-${segment.text}`}
-            {...webHoverProps(
-              hoverable ? () => onSegmentHover(segment) : undefined,
-            )}
+            {...webHoverProps(segment.hoverText)}
             style={[
               segment.color ? { color: segment.color } : null,
               segment.bold ? styles.boldText : null,
@@ -780,9 +778,9 @@ function RichText({
   );
 }
 
-function webHoverProps(onHover?: () => void): Record<string, unknown> {
-  if (!onHover || Platform.OS !== "web") return {};
-  return { onMouseEnter: onHover };
+function webHoverProps(hoverText?: string): Record<string, unknown> {
+  if (!hoverText || Platform.OS !== "web") return {};
+  return { title: hoverText };
 }
 
 function textDecorationFor(segment: ChatSegment) {
@@ -907,6 +905,43 @@ function GuiWindowModal({
             )}
           />
 
+          <View style={styles.guiDetailCard}>
+            {selectedItem ? (
+              <>
+                <Text style={styles.guiDetailName} numberOfLines={2}>
+                  {itemLabel(selectedItem)}
+                </Text>
+                <Text style={styles.guiDetailMeta} numberOfLines={1}>
+                  슬롯 {selectedSlot?.index ?? "-"} · {selectedItem.name}
+                </Text>
+                {selectedItem.lore?.length ? (
+                  <View style={styles.guiLoreList}>
+                    {selectedItem.lore.slice(0, 8).map((line, index) => (
+                      <Text
+                        key={`${selectedItem.name}-${index}-${line}`}
+                        style={styles.guiLoreText}
+                        numberOfLines={2}
+                      >
+                        {line}
+                      </Text>
+                    ))}
+                    {selectedItem.lore.length > 8 ? (
+                      <Text style={styles.guiLoreMore}>
+                        +{selectedItem.lore.length - 8} lines
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : (
+                  <Text style={styles.guiLoreEmpty}>표시할 로어 없음</Text>
+                )}
+              </>
+            ) : (
+              <Text style={styles.guiLoreEmpty}>
+                {selectedSlot ? `빈 슬롯 ${selectedSlot.index}` : "슬롯을 선택하면 이름과 로어가 표시됩니다"}
+              </Text>
+            )}
+          </View>
+
           <View style={styles.guiFooter}>
             <View style={styles.guiSelectionCopy}>
               <Text style={styles.guiFooterText} numberOfLines={1}>
@@ -920,24 +955,6 @@ function GuiWindowModal({
                 <Text style={styles.guiCursorText} numberOfLines={1}>
                   커서: {itemLabel(gui.selectedItem)}
                 </Text>
-              ) : null}
-              {selectedItem?.lore?.length ? (
-                <View style={styles.guiLoreList}>
-                  {selectedItem.lore.slice(0, 6).map((line, index) => (
-                    <Text
-                      key={`${selectedItem.name}-${index}-${line}`}
-                      style={styles.guiLoreText}
-                      numberOfLines={2}
-                    >
-                      {line}
-                    </Text>
-                  ))}
-                  {selectedItem.lore.length > 6 ? (
-                    <Text style={styles.guiLoreMore}>
-                      +{selectedItem.lore.length - 6} lines
-                    </Text>
-                  ) : null}
-                </View>
               ) : null}
             </View>
             <Pressable
@@ -1452,6 +1469,28 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "700",
   },
+  guiDetailCard: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+    backgroundColor: "rgba(13, 17, 23, 0.76)",
+    minHeight: 64,
+  },
+  guiDetailName: {
+    color: theme.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "900",
+  },
+  guiDetailMeta: {
+    color: theme.textDim,
+    fontSize: 11,
+    marginTop: 3,
+  },
   guiFooter: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1490,6 +1529,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     marginTop: 2,
+  },
+  guiLoreEmpty: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 17,
   },
   guiActionBtn: {
     minWidth: 96,

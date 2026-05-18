@@ -74,6 +74,12 @@ const LEGACY_COLORS: Record<string, string> = {
   f: "#ffffff",
 };
 
+const MINI_COLOR_ALIASES: Record<string, string> = {
+  ...MC_COLORS,
+  grey: MC_COLORS.gray,
+  dark_grey: MC_COLORS.dark_gray,
+};
+
 const TRANSLATIONS: Record<string, string> = {
   "chat.type.text": "<%1$s> %2$s",
   "chat.type.announcement": "[%1$s] %2$s",
@@ -132,14 +138,14 @@ export function richSegments(msg: AnyChatMessage | string | undefined | null): C
   if (msg == null) return undefined;
   if (typeof msg === "string") return [{ text: msg }];
   const source = msg.json ?? msg;
-  const segments = flattenComponent(source, {}).flatMap(splitLegacyCodes);
+  const segments = applyInlineFormatting(flattenComponent(source, {}));
   const merged = mergeAdjacentSegments(segments).filter((segment) => segment.text.length > 0);
   return merged.length > 0 ? merged : undefined;
 }
 
 export function componentPlainText(value: unknown): string {
   const source = parseTextComponent(value);
-  const segments = flattenComponent(source, {}).flatMap(splitLegacyCodes);
+  const segments = applyInlineFormatting(flattenComponent(source, {}));
   const text = segments.map((segment) => segment.text).join("");
   return replaceBrokenGlyphs(text).trim();
 }
@@ -355,6 +361,231 @@ function sameStyle(a: ChatSegment, b: ChatSegment): boolean {
     a.clickEvent?.action === b.clickEvent?.action &&
     a.clickEvent?.value === b.clickEvent?.value
   );
+}
+
+function applyInlineFormatting(segments: ChatSegment[]): ChatSegment[] {
+  return segments.flatMap(splitMiniMessageTags).flatMap(splitLegacyCodes);
+}
+
+function splitMiniMessageTags(segment: ChatSegment): ChatSegment[] {
+  if (!segment.text.includes("<")) return [segment];
+
+  const output: ChatSegment[] = [];
+  const baseStyle = omitText(segment);
+  let style: Omit<ChatSegment, "text"> = { ...baseStyle };
+  const styleStack: Omit<ChatSegment, "text">[] = [];
+  let buffer = "";
+
+  const flush = () => {
+    if (!buffer) return;
+    output.push({ ...style, text: replaceBrokenGlyphs(buffer) });
+    buffer = "";
+  };
+
+  for (let i = 0; i < segment.text.length; i += 1) {
+    const ch = segment.text[i];
+    if (ch !== "<") {
+      if (ch === "\\" && i + 1 < segment.text.length && "<>\\'\"".includes(segment.text[i + 1])) {
+        buffer += segment.text[i + 1];
+        i += 1;
+      } else {
+        buffer += ch;
+      }
+      continue;
+    }
+
+    const end = findMiniTagEnd(segment.text, i + 1);
+    if (end < 0) {
+      buffer += ch;
+      continue;
+    }
+
+    const rawTag = segment.text.slice(i + 1, end).trim();
+    const action = parseMiniTag(rawTag);
+    if (!action) {
+      buffer += segment.text.slice(i, end + 1);
+      i = end;
+      continue;
+    }
+
+    flush();
+    i = end;
+    if (action.kind === "close") {
+      style = styleStack.pop() ?? { ...baseStyle };
+    } else if (action.kind === "reset") {
+      styleStack.length = 0;
+      style = { ...baseStyle };
+    } else {
+      styleStack.push({ ...style });
+      style = { ...style, ...action.style };
+    }
+  }
+
+  flush();
+  return output.length > 0 ? output : [segment];
+}
+
+function omitText(segment: ChatSegment): Omit<ChatSegment, "text"> {
+  const { text: _text, ...style } = segment;
+  return style;
+}
+
+function findMiniTagEnd(text: string, start: number): number {
+  let quote: "'" | "\"" | null = null;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "\\" && i + 1 < text.length) {
+      i += 1;
+      continue;
+    }
+    if ((ch === "'" || ch === "\"") && quote == null) {
+      quote = ch;
+      continue;
+    }
+    if (ch === quote) {
+      quote = null;
+      continue;
+    }
+    if (ch === ">" && quote == null) return i;
+  }
+  return -1;
+}
+
+type MiniTagAction =
+  | { kind: "open"; style: Omit<ChatSegment, "text"> }
+  | { kind: "close" }
+  | { kind: "reset" };
+
+function parseMiniTag(rawTag: string): MiniTagAction | null {
+  if (!rawTag) return null;
+  const closing = rawTag.startsWith("/");
+  const body = closing ? rawTag.slice(1).trim() : rawTag;
+  const parts = splitMiniTagParts(body);
+  const name = (parts[0] ?? "").toLowerCase();
+  if (!name) return null;
+
+  if (closing) return isKnownMiniTag(name) ? { kind: "close" } : null;
+  if (name === "reset" || name === "r") return { kind: "reset" };
+
+  const color = miniMessageColor(name);
+  if (color) return { kind: "open", style: { color } };
+
+  const decoration = miniDecoration(name);
+  if (decoration) {
+    const value = miniBoolean(parts[1]);
+    return { kind: "open", style: { [decoration]: value } };
+  }
+
+  if (name === "click" && parts.length >= 3) {
+    const action = parts[1]?.toLowerCase();
+    const value = unquoteMiniValue(parts.slice(2).join(":"));
+    if (!action || !value) return null;
+    return { kind: "open", style: { clickEvent: { action, value } } };
+  }
+
+  if (name === "hover" && parts.length >= 3) {
+    const action = parts[1]?.toLowerCase();
+    if (action !== "show_text") return null;
+    const hoverText = componentPlainText(unquoteMiniValue(parts.slice(2).join(":")));
+    if (!hoverText) return null;
+    return { kind: "open", style: { hoverText } };
+  }
+
+  return null;
+}
+
+function isKnownMiniTag(name: string): boolean {
+  return (
+    name === "click" ||
+    name === "hover" ||
+    name === "reset" ||
+    name === "r" ||
+    Boolean(miniMessageColor(name)) ||
+    Boolean(miniDecoration(name))
+  );
+}
+
+function splitMiniTagParts(body: string): string[] {
+  const parts: string[] = [];
+  let quote: "'" | "\"" | null = null;
+  let buffer = "";
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch === "\\" && i + 1 < body.length) {
+      buffer += ch + body[i + 1];
+      i += 1;
+      continue;
+    }
+    if ((ch === "'" || ch === "\"") && quote == null) {
+      quote = ch;
+      buffer += ch;
+      continue;
+    }
+    if (ch === quote) {
+      quote = null;
+      buffer += ch;
+      continue;
+    }
+    if (ch === ":" && quote == null) {
+      parts.push(buffer.trim());
+      buffer = "";
+      continue;
+    }
+    buffer += ch;
+  }
+  parts.push(buffer.trim());
+  return parts;
+}
+
+function miniMessageColor(name: string): string | undefined {
+  if (/^#[0-9a-f]{6}$/i.test(name)) return name.toLowerCase();
+  if (/^[0-9a-f]{6}$/i.test(name)) return `#${name.toLowerCase()}`;
+  return MINI_COLOR_ALIASES[name];
+}
+
+function miniDecoration(name: string): keyof Pick<
+  ChatSegment,
+  "bold" | "italic" | "underlined" | "strikethrough"
+> | null {
+  switch (name) {
+    case "bold":
+    case "b":
+      return "bold";
+    case "italic":
+    case "i":
+    case "em":
+      return "italic";
+    case "underlined":
+    case "underline":
+    case "u":
+      return "underlined";
+    case "strikethrough":
+    case "strike":
+    case "s":
+      return "strikethrough";
+    default:
+      return null;
+  }
+}
+
+function miniBoolean(value: string | undefined): boolean {
+  if (!value) return true;
+  const normalized = value.toLowerCase();
+  return normalized !== "false" && normalized !== "no" && normalized !== "0";
+}
+
+function unquoteMiniValue(value: string): string {
+  const trimmed = value.trim();
+  const quote = trimmed[0];
+  const hasMatchingQuote =
+    (quote === "'" || quote === "\"") && trimmed.endsWith(quote) && trimmed.length >= 2;
+  const unwrapped = hasMatchingQuote ? trimmed.slice(1, -1) : trimmed;
+  return unwrapped
+    .replace(/\\'/g, "'")
+    .replace(/\\"/g, "\"")
+    .replace(/\\</g, "<")
+    .replace(/\\>/g, ">")
+    .replace(/\\\\/g, "\\");
 }
 
 function splitLegacyCodes(segment: ChatSegment): ChatSegment[] {

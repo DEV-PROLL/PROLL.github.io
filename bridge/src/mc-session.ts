@@ -675,7 +675,7 @@ function readComponentSource(source: unknown, keys: string[]): unknown {
 
   if (normalized instanceof Map) {
     for (const key of keys) {
-      if (normalized.has(key)) return normalized.get(key);
+      if (normalized.has(key)) return componentPayload(normalized.get(key));
     }
     return undefined;
   }
@@ -687,7 +687,7 @@ function readComponentSource(source: unknown, keys: string[]): unknown {
       const record = obj as Record<string, unknown>;
       const entryKey = record.type ?? record.name ?? record.key;
       if (typeof entryKey === "string" && keys.includes(entryKey)) {
-        return record.value ?? record.data ?? record;
+        return componentPayload(record);
       }
     }
     return undefined;
@@ -696,11 +696,20 @@ function readComponentSource(source: unknown, keys: string[]): unknown {
   if (typeof normalized === "object") {
     const record = normalized as Record<string, unknown>;
     for (const key of keys) {
-      if (record[key] != null) return record[key];
+      if (record[key] != null) return componentPayload(record[key]);
     }
   }
 
   return undefined;
+}
+
+function componentPayload(value: unknown): unknown {
+  const normalized = unwrapNbtValue(value);
+  if (!normalized || typeof normalized !== "object") return normalized;
+  const record = normalized as Record<string, unknown>;
+  if ("data" in record) return unwrapNbtValue(record.data);
+  if ("value" in record) return unwrapNbtValue(record.value);
+  return normalized;
 }
 
 function readItemNbtDisplayField(item: Item, field: "Name" | "Lore"): unknown {

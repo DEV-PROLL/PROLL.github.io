@@ -9,6 +9,7 @@ const publicDir = join(projectRoot, "public");
 await mkdir(distDir, { recursive: true });
 await copyFile(join(publicDir, "manifest.json"), join(distDir, "manifest.json"));
 await copyFile(join(publicDir, "icon.svg"), join(distDir, "icon.svg"));
+await copyFile(join(publicDir, "CNAME"), join(distDir, "CNAME"));
 await copyFile(
   join(publicDir, "service-worker.js"),
   join(distDir, "service-worker.js"),
