@@ -13,6 +13,9 @@ import {
   richSegments,
 } from "./chat-format";
 
+const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
+const debuggedGuiItems = new Set<string>();
+
 export interface McSessionOptions {
   host: string;
   port: number;
@@ -605,6 +608,7 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
     readItemComponent(item, ["minecraft:tooltip", "tooltip", "Tooltips"]),
     readItemNbtDisplayField(item, "Lore"),
   ]);
+  debugGuiItem(item, displayName, lore);
   return {
     name: item.name,
     displayName,
@@ -613,6 +617,93 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
     metadata: item.metadata,
     lore: lore.length > 0 ? lore : undefined,
   };
+}
+
+function debugGuiItem(item: Item, displayName: string, lore: string[]): void {
+  if (!DEBUG_GUI_ITEMS) return;
+  const summary = summarizeItemForDebug(item, displayName, lore);
+  const key = JSON.stringify(summary);
+  if (debuggedGuiItems.has(key) || debuggedGuiItems.size >= 40) return;
+  debuggedGuiItems.add(key);
+  console.log(`[bridge] gui_item ${key}`);
+}
+
+function summarizeItemForDebug(
+  item: Item,
+  displayName: string,
+  lore: string[],
+): Record<string, unknown> {
+  const obj = item as unknown as Record<string, unknown>;
+  return {
+    name: item.name,
+    displayName,
+    lore,
+    customName: summarizeValue(obj.customName),
+    customLore: summarizeValue(obj.customLore),
+    componentKeys: componentKeys(item),
+    components: summarizeValue(obj.components),
+    componentMap: summarizeValue(obj.componentMap),
+    nbt: summarizeValue(obj.nbt),
+  };
+}
+
+function componentKeys(item: Item): string[] {
+  const obj = item as unknown as Record<string, unknown>;
+  const keys = new Set<string>();
+  const components = obj.components;
+  if (Array.isArray(components)) {
+    for (const component of components) {
+      const normalized = unwrapNbtValue(component);
+      if (!normalized || typeof normalized !== "object") continue;
+      const record = normalized as Record<string, unknown>;
+      const key = record.type ?? record.name ?? record.key;
+      if (typeof key === "string") keys.add(key);
+    }
+  }
+  const componentMap = obj.componentMap;
+  if (componentMap instanceof Map) {
+    for (const key of componentMap.keys()) {
+      if (typeof key === "string") keys.add(key);
+    }
+  }
+  return [...keys].sort();
+}
+
+function summarizeValue(value: unknown, depth = 0): unknown {
+  const normalized = unwrapNbtValue(value);
+  if (normalized == null) return normalized;
+  if (typeof normalized === "string") {
+    return normalized.length > 220 ? `${normalized.slice(0, 220)}...` : normalized;
+  }
+  if (
+    typeof normalized === "number" ||
+    typeof normalized === "boolean"
+  ) {
+    return normalized;
+  }
+  if (depth >= 3) return "[Object]";
+  if (normalized instanceof Map) {
+    const entries: Record<string, unknown> = {};
+    let count = 0;
+    for (const [key, entryValue] of normalized.entries()) {
+      if (count >= 12) break;
+      entries[String(key)] = summarizeValue(entryValue, depth + 1);
+      count += 1;
+    }
+    return entries;
+  }
+  if (Array.isArray(normalized)) {
+    return normalized.slice(0, 12).map((entry) => summarizeValue(entry, depth + 1));
+  }
+  if (typeof normalized === "object") {
+    const record = normalized as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(record).slice(0, 16)) {
+      out[key] = summarizeValue(record[key], depth + 1);
+    }
+    return out;
+  }
+  return String(normalized);
 }
 
 function firstNonEmptyLore(candidates: unknown[]): string[] {
