@@ -1,7 +1,7 @@
 {
-  "name": "PROLL Minecraft Chat",
-  "short_name": "PROLL",
-  "description": "Minecraft Java chat and command client for PROLL bridge sessions.",
+  "name": "루둘기 앱",
+  "short_name": "루둘기",
+  "description": "99999.kr Minecraft Java 채팅과 명령어 클라이언트.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

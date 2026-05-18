@@ -17,6 +17,7 @@ await copyFile(
 const indexPath = join(distDir, "index.html");
 let html = await readFile(indexPath, "utf8");
 const bridgeUrl = process.env.EXPO_PUBLIC_BRIDGE_URL?.trim();
+const appTitle = "루둘기 앱";
 
 if (!html.includes('rel="manifest"')) {
   html = html.replace(
@@ -26,7 +27,7 @@ if (!html.includes('rel="manifest"')) {
       '  <link rel="icon" href="./icon.svg" type="image/svg+xml">',
       '  <link rel="apple-touch-icon" href="./icon.svg">',
       '  <meta name="apple-mobile-web-app-capable" content="yes">',
-      '  <meta name="apple-mobile-web-app-title" content="PROLL">',
+      `  <meta name="apple-mobile-web-app-title" content="${appTitle}">`,
       '  <meta name="mobile-web-app-capable" content="yes">',
       "</head>",
     ].join("\n"),
@@ -54,6 +55,12 @@ html = html
   .replaceAll('href="/icon.svg"', 'href="./icon.svg"')
   .replaceAll('src="/_expo/', 'src="./_expo/')
   .replaceAll('navigator.serviceWorker.register("/service-worker.js")', 'navigator.serviceWorker.register("./service-worker.js")');
+
+if (/<title>[\s\S]*?<\/title>/.test(html)) {
+  html = html.replace(/<title>[\s\S]*?<\/title>/, `<title>${appTitle}</title>`);
+} else {
+  html = html.replace("</head>", `  <title>${appTitle}</title>\n</head>`);
+}
 
 html = html.replace(
   /\n?  <script id="rudulgi-runtime-config">[\s\S]*?<\/script>/,

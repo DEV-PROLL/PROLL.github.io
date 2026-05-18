@@ -74,6 +74,44 @@ const LEGACY_COLORS: Record<string, string> = {
   f: "#ffffff",
 };
 
+const TRANSLATIONS: Record<string, string> = {
+  "chat.type.text": "<%1$s> %2$s",
+  "chat.type.announcement": "[%1$s] %2$s",
+  "chat.type.admin": "[%1$s: %2$s]",
+  "chat.type.advancement.task": "%1$s has made the advancement %2$s",
+  "chat.type.advancement.goal": "%1$s has reached the goal %2$s",
+  "chat.type.advancement.challenge": "%1$s has completed the challenge %2$s",
+  "death.attack.generic": "%1$s died",
+  "death.attack.player": "%1$s was slain by %2$s",
+  "death.attack.mob": "%1$s was slain by %2$s",
+  "death.attack.arrow": "%1$s was shot by %2$s",
+  "death.attack.trident": "%1$s was impaled by %2$s",
+  "death.attack.thrown": "%1$s was pummeled by %2$s",
+  "death.attack.explosion": "%1$s blew up",
+  "death.attack.explosion.player": "%1$s was blown up by %2$s",
+  "death.attack.magic": "%1$s was killed by magic",
+  "death.attack.wither": "%1$s withered away",
+  "death.attack.outOfWorld": "%1$s fell out of the world",
+  "death.attack.fell.accident.generic": "%1$s hit the ground too hard",
+  "death.fell.accident.generic": "%1$s fell from a high place",
+  "death.attack.fall": "%1$s hit the ground too hard",
+  "death.attack.inFire": "%1$s went up in flames",
+  "death.attack.onFire": "%1$s burned to death",
+  "death.attack.lava": "%1$s tried to swim in lava",
+  "death.attack.drown": "%1$s drowned",
+  "death.attack.starve": "%1$s starved to death",
+  "death.attack.cactus": "%1$s was pricked to death",
+  "death.attack.freeze": "%1$s froze to death",
+  "death.attack.lightningBolt": "%1$s was struck by lightning",
+  "death.attack.flyIntoWall": "%1$s experienced kinetic energy",
+  "death.attack.cramming": "%1$s was squished too much",
+  "death.attack.dryout": "%1$s dried out",
+  "death.attack.sweetBerryBush": "%1$s was poked to death by a sweet berry bush",
+  "death.attack.stalagmite": "%1$s was impaled on a stalagmite",
+  "death.attack.fallingBlock": "%1$s was squashed by a falling block",
+  "death.attack.anvil": "%1$s was squashed by a falling anvil",
+};
+
 export function plainText(msg: AnyChatMessage | string | undefined | null): string {
   if (msg == null) return "";
   if (typeof msg === "string") return replaceBrokenGlyphs(msg);
@@ -200,13 +238,9 @@ function inheritStyle(component: {
 
 function flattenTranslate(translate: string, withValue: unknown, style: SegmentStyle): ChatSegment[] {
   const args = Array.isArray(withValue) ? withValue : [];
-  if (translate === "chat.type.text" && args.length >= 2) {
-    return [
-      { ...style, text: "<" },
-      ...flattenComponent(args[0], style),
-      { ...style, text: "> " },
-      ...flattenComponent(args[1], style),
-    ];
+  const template = TRANSLATIONS[translate] ?? fallbackTranslation(translate, args.length);
+  if (template) {
+    return applyTranslationTemplate(template, args, style);
   }
   if (args.length === 0) return [{ ...style, text: translate }];
 
@@ -215,6 +249,40 @@ function flattenTranslate(translate: string, withValue: unknown, style: SegmentS
     if (index > 0) segments.push({ ...style, text: " " });
     segments.push(...flattenComponent(arg, style));
   });
+  return segments;
+}
+
+function fallbackTranslation(translate: string, argCount: number): string | null {
+  if (argCount === 0) return null;
+  if (translate.startsWith("death.attack.") || translate.startsWith("death.")) {
+    return argCount >= 2 ? "%1$s died (%2$s)" : "%1$s died";
+  }
+  return null;
+}
+
+function applyTranslationTemplate(
+  template: string,
+  args: unknown[],
+  style: SegmentStyle,
+): ChatSegment[] {
+  const segments: ChatSegment[] = [];
+  let cursor = 0;
+  let sequentialIndex = 0;
+  const placeholder = /%((\d+)\$)?s/g;
+  let match: RegExpExecArray | null;
+  while ((match = placeholder.exec(template)) != null) {
+    if (match.index > cursor) {
+      segments.push({ ...style, text: template.slice(cursor, match.index) });
+    }
+    const argIndex = match[2] ? Number(match[2]) - 1 : sequentialIndex++;
+    if (args[argIndex] != null) {
+      segments.push(...flattenComponent(args[argIndex], style));
+    }
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < template.length) {
+    segments.push({ ...style, text: template.slice(cursor) });
+  }
   return segments;
 }
 
@@ -232,8 +300,9 @@ function parseTextComponent(value: unknown): unknown {
 
 function normalizeColor(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  if (/^#[0-9a-f]{6}$/i.test(value)) return value;
-  return MC_COLORS[value];
+  const color = value.toLowerCase();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color;
+  return MC_COLORS[color];
 }
 
 function normalizeClickEvent(value: unknown): SegmentStyle["clickEvent"] | undefined {
@@ -313,6 +382,22 @@ function splitLegacyCodes(segment: ChatSegment): ChatSegment[] {
     i += 1;
     flush();
 
+    if (code === "x") {
+      const hex = readLegacyHexColor(segment.text, i + 1);
+      if (hex) {
+        style = {
+          ...style,
+          color: hex,
+          bold: false,
+          italic: false,
+          underlined: false,
+          strikethrough: false,
+        };
+        i += 12;
+        continue;
+      }
+    }
+
     if (LEGACY_COLORS[code]) {
       style = {
         ...style,
@@ -348,6 +433,17 @@ function splitLegacyCodes(segment: ChatSegment): ChatSegment[] {
 
   flush();
   return segments;
+}
+
+function readLegacyHexColor(text: string, start: number): string | null {
+  let hex = "";
+  for (let index = 0; index < 6; index += 1) {
+    const section = text[start + index * 2];
+    const digit = text[start + index * 2 + 1];
+    if (section !== "§" || !digit || !/[0-9a-f]/i.test(digit)) return null;
+    hex += digit;
+  }
+  return `#${hex.toLowerCase()}`;
 }
 
 function replaceBrokenGlyphs(text: string): string {

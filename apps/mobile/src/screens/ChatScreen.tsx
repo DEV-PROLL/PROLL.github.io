@@ -75,6 +75,7 @@ export function ChatScreen({
   const [activeWindow, setActiveWindow] = useState<GuiWindow | null>(null);
   const [selectedWindowSlot, setSelectedWindowSlot] = useState<number | null>(null);
   const [pendingSlot, setPendingSlot] = useState<number | null>(null);
+  const [tooltipText, setTooltipText] = useState<string | null>(null);
   const listRef = useRef<FlatList<DisplayedMessage>>(null);
   const completionRequestRef = useRef("");
   const latestInputRef = useRef(input);
@@ -480,7 +481,7 @@ export function ChatScreen({
 
   const handleSegmentHover = (segment: ChatSegment) => {
     if (segment.hoverText) {
-      Alert.alert("상세 정보", segment.hoverText);
+      setTooltipText(segment.hoverText);
     }
   };
 
@@ -665,6 +666,10 @@ export function ChatScreen({
             onClickSelected={handleWindowSelectedClick}
           />
         ) : null}
+
+        {tooltipText ? (
+          <TooltipModal text={tooltipText} onClose={() => setTooltipText(null)} />
+        ) : null}
       </View>
     </KeyboardAvoidingView>
   );
@@ -748,10 +753,13 @@ function RichText({
         return (
           <Text
             key={`${index}-${segment.text}`}
+            {...webHoverProps(
+              hoverable ? () => onSegmentHover(segment) : undefined,
+            )}
             style={[
               segment.color ? { color: segment.color } : null,
-              segment.bold ? styles.boldText : styles.normalWeightText,
-              segment.italic ? styles.italicText : styles.normalText,
+              segment.bold ? styles.boldText : null,
+              segment.italic ? styles.italicText : null,
               textDecorationFor(segment),
               clickable || hoverable ? styles.interactiveText : null,
             ]}
@@ -770,6 +778,11 @@ function RichText({
       })}
     </Text>
   );
+}
+
+function webHoverProps(onHover?: () => void): Record<string, unknown> {
+  if (!onHover || Platform.OS !== "web") return {};
+  return { onMouseEnter: onHover };
 }
 
 function textDecorationFor(segment: ChatSegment) {
@@ -943,6 +956,22 @@ function GuiWindowModal({
           </View>
         </View>
       </View>
+    </Modal>
+  );
+}
+
+function TooltipModal({ text, onClose }: { text: string; onClose: () => void }) {
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.tooltipBackdrop} onPress={onClose}>
+        <Pressable style={styles.tooltipPanel}>
+          <Text style={styles.tooltipTitle}>상세 정보</Text>
+          <Text style={styles.tooltipText}>{text}</Text>
+          <Pressable style={styles.tooltipCloseBtn} onPress={onClose}>
+            <Text style={styles.tooltipCloseText}>닫기</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
@@ -1221,16 +1250,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   boldText: {
-    fontWeight: "800",
-  },
-  normalWeightText: {
-    fontWeight: "400",
+    fontWeight: "900",
   },
   italicText: {
     fontStyle: "italic",
-  },
-  normalText: {
-    fontStyle: "normal",
   },
   underlineText: {
     textDecorationLine: "underline",
@@ -1493,5 +1516,47 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 13,
     fontWeight: "900",
+  },
+  tooltipBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.28)",
+    paddingHorizontal: 14,
+    paddingBottom: Platform.OS === "ios" ? 26 : 14,
+  },
+  tooltipPanel: {
+    width: "100%",
+    maxWidth: 620,
+    alignSelf: "center",
+    backgroundColor: "rgba(13, 17, 23, 0.98)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+    gap: 10,
+  },
+  tooltipTitle: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  tooltipText: {
+    color: theme.text,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  tooltipCloseBtn: {
+    alignSelf: "flex-end",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: "rgba(240, 246, 252, 0.06)",
+  },
+  tooltipCloseText: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "800",
   },
 });

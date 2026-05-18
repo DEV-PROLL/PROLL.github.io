@@ -590,12 +590,19 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
       "custom_name",
       "customName",
       "Name",
+      "minecraft:item_name",
+      "item_name",
+      "itemName",
+      "minecraft:display_name",
+      "display_name",
+      "displayName",
     ])) ||
     componentPlainText(readItemNbtDisplayField(item, "Name")) ||
     item.displayName;
   const lore = firstNonEmptyLore([
     item.customLore,
     readItemComponent(item, ["minecraft:lore", "lore", "Lore", "customLore"]),
+    readItemComponent(item, ["minecraft:tooltip", "tooltip", "Tooltips"]),
     readItemNbtDisplayField(item, "Lore"),
   ]);
   return {

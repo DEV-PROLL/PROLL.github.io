@@ -96,6 +96,7 @@ export function MinecraftHead({ uuid, size = 48, style }: MinecraftHeadProps) {
   }, [normalizedUuid]);
 
   if (normalizedUuid && !imageFailed) {
+    const avatarUuid = normalizedUuid.replace(/-/g, "");
     return (
       <View
         style={[
@@ -110,10 +111,10 @@ export function MinecraftHead({ uuid, size = 48, style }: MinecraftHeadProps) {
       >
         <Image
           source={{
-            uri: `https://crafatar.com/avatars/${normalizedUuid}?size=${Math.max(
+            uri: `https://mc-heads.net/avatar/${avatarUuid}/${Math.max(
               64,
               Math.round(size * 2),
-            )}&overlay`,
+            )}.png`,
           }}
           onError={() => setImageFailed(true)}
           style={styles.headImage}
