@@ -14,7 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import type { NativeSyntheticEvent, TextInputKeyPressEventData } from "react-native";
+import type { NativeSyntheticEvent, TextInputKeyPressEventData, ViewStyle } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { theme } from "../theme";
 import type {
@@ -78,6 +78,20 @@ const newId = () => `m-${++messageCounter}-${Date.now()}`;
 const MAX_INPUT_HISTORY = 50;
 const MAX_AUTO_RECONNECTS = 6;
 const DEFAULT_TITLE_TIMING: TitleTimingState = { fadeIn: 10, stay: 70, fadeOut: 20 };
+const WEB_TITLE_BACKDROP_BLUR =
+  Platform.OS === "web"
+    ? ({
+        backdropFilter: "blur(7px)",
+        WebkitBackdropFilter: "blur(7px)",
+      } as unknown as ViewStyle)
+    : null;
+const WEB_GLASS_BLUR =
+  Platform.OS === "web"
+    ? ({
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+      } as unknown as ViewStyle)
+    : null;
 
 export function ChatScreen({
   bridgeUrl,
@@ -919,7 +933,7 @@ function ActionBarOverlay({
 }) {
   return (
     <View pointerEvents="box-none" style={styles.actionBarOverlay}>
-      <View style={styles.actionBarBubble}>
+      <View style={[styles.actionBarBubble, WEB_GLASS_BLUR]}>
         <RichText
           text={actionBar.text}
           segments={actionBar.segments}
@@ -935,24 +949,27 @@ function ActionBarOverlay({
 function TitleOverlay({ overlay }: { overlay: TitleOverlayState }) {
   return (
     <View pointerEvents="none" style={styles.titleOverlay}>
-      {overlay.title ? (
-        <RichText
-          text={overlay.title.text}
-          segments={overlay.title.segments}
-          style={styles.titleOverlayText}
-          onSegmentClick={noopSegmentHandler}
-          onSegmentHover={noopSegmentHandler}
-        />
-      ) : null}
-      {overlay.subtitle ? (
-        <RichText
-          text={overlay.subtitle.text}
-          segments={overlay.subtitle.segments}
-          style={styles.titleOverlaySubtext}
-          onSegmentClick={noopSegmentHandler}
-          onSegmentHover={noopSegmentHandler}
-        />
-      ) : null}
+      <View style={[styles.titleOverlayBackdrop, WEB_TITLE_BACKDROP_BLUR]} />
+      <View style={styles.titleOverlayContent}>
+        {overlay.title ? (
+          <RichText
+            text={overlay.title.text}
+            segments={overlay.title.segments}
+            style={styles.titleOverlayText}
+            onSegmentClick={noopSegmentHandler}
+            onSegmentHover={noopSegmentHandler}
+          />
+        ) : null}
+        {overlay.subtitle ? (
+          <RichText
+            text={overlay.subtitle.text}
+            segments={overlay.subtitle.segments}
+            style={styles.titleOverlaySubtext}
+            onSegmentClick={noopSegmentHandler}
+            onSegmentHover={noopSegmentHandler}
+          />
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -1715,12 +1732,31 @@ const styles = StyleSheet.create({
   },
   titleOverlay: {
     position: "absolute",
-    left: 18,
-    right: 18,
-    top: "34%",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
     zIndex: 8,
     alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+  },
+  titleOverlayBackdrop: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.32)",
+  },
+  titleOverlayContent: {
+    maxWidth: 660,
+    alignItems: "center",
     gap: 7,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: "rgba(13, 17, 23, 0.14)",
   },
   titleOverlayText: {
     color: theme.text,
@@ -1755,9 +1791,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 14,
-    backgroundColor: "rgba(13, 17, 23, 0.82)",
+    backgroundColor: "rgba(13, 17, 23, 0.72)",
     borderColor: theme.glassBorder,
     borderWidth: 1,
+    shadowColor: "#000000",
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
   },
   actionBarText: {
     color: theme.text,
