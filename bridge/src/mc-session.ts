@@ -6,6 +6,7 @@ import type { Window } from "prismarine-windows";
 import { normalizeAuthError } from "./auth";
 import type {
   BossBarSummary,
+  ChatSegment,
   CompletionMatch,
   GuiItem,
   GuiWindow,
@@ -22,6 +23,7 @@ import {
 
 type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
 type BossBarsMessage = Extract<ServerMessage, { type: "boss_bars" }>;
+type SerializedLoreLine = { text: string; segments?: ChatSegment[] };
 
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
 const debuggedGuiItems = new Set<string>();
@@ -852,9 +854,9 @@ function serializeWindow(window: Window): GuiWindow {
 
 function serializeItem(item: Item | null | undefined): GuiItem | null {
   if (!item) return null;
-  const customDisplayName =
-    componentPlainText(item.customName) ||
-    componentPlainText(readItemComponent(item, [
+  const displayNameSource = firstNonEmptyComponent([
+    item.customName,
+    readItemComponent(item, [
       "minecraft:custom_name",
       "custom_name",
       "customName",
@@ -865,25 +867,36 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
       "minecraft:display_name",
       "display_name",
       "displayName",
-    ])) ||
-    componentPlainText(readItemNbtDisplayField(item, "Name"));
+    ]),
+    readItemNbtDisplayField(item, "Name"),
+  ]);
+  const customDisplayName = componentPlainText(displayNameSource);
   const rawLore = firstNonEmptyLore([
     item.customLore,
     readItemComponent(item, ["minecraft:lore", "lore", "Lore", "customLore"]),
     readItemComponent(item, ["minecraft:tooltip", "tooltip", "Tooltips"]),
     readItemNbtDisplayField(item, "Lore"),
   ]);
-  const inferredDisplayName = !customDisplayName ? rawLore[0] : undefined;
+  const inferredDisplayName = !customDisplayName ? rawLore[0]?.text : undefined;
   const displayName = customDisplayName || inferredDisplayName || item.displayName;
-  const lore = inferredDisplayName ? rawLore.slice(1) : rawLore;
+  const displayNameSegments =
+    richSegments(displayNameSource as never) ??
+    (!customDisplayName && rawLore[0]?.segments ? rawLore[0].segments : undefined);
+  const loreLines = inferredDisplayName ? rawLore.slice(1) : rawLore;
+  const lore = loreLines.map((line) => line.text);
+  const loreSegments = loreLines.map((line) => line.segments).some(Boolean)
+    ? loreLines.map((line) => line.segments ?? [{ text: line.text }])
+    : undefined;
   debugGuiItem(item, displayName, lore);
   return {
     name: item.name,
     displayName,
+    displayNameSegments,
     count: item.count,
     type: item.type,
     metadata: item.metadata,
     lore: lore.length > 0 ? lore : undefined,
+    loreSegments,
   };
 }
 
@@ -974,7 +987,14 @@ function summarizeValue(value: unknown, depth = 0): unknown {
   return String(normalized);
 }
 
-function firstNonEmptyLore(candidates: unknown[]): string[] {
+function firstNonEmptyComponent(candidates: unknown[]): unknown {
+  for (const candidate of candidates) {
+    if (componentPlainText(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function firstNonEmptyLore(candidates: unknown[]): SerializedLoreLine[] {
   for (const candidate of candidates) {
     const lore = serializeItemLore(candidate);
     if (lore.length > 0) return lore;
@@ -982,14 +1002,27 @@ function firstNonEmptyLore(candidates: unknown[]): string[] {
   return [];
 }
 
-function serializeItemLore(lore: unknown): string[] {
+function serializeItemLore(lore: unknown): SerializedLoreLine[] {
   const normalized = unwrapNbtValue(lore);
   const lines = extractLoreLines(normalized);
-  return lines
-    .flatMap((line) => componentPlainText(line).split(/\r?\n/))
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 16);
+  const serialized: SerializedLoreLine[] = [];
+  for (const line of lines) {
+    const text = componentPlainText(line);
+    const segments = richSegments(line as never);
+    const splitLines = text.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+    if (splitLines.length <= 1) {
+      const single = splitLines[0];
+      if (single) serialized.push({ text: single, segments });
+      continue;
+    }
+    for (const splitLine of splitLines) {
+      serialized.push({
+        text: splitLine,
+        segments: richSegments(splitLine as never),
+      });
+    }
+  }
+  return serialized;
 }
 
 function extractLoreLines(value: unknown): unknown[] {

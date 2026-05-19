@@ -144,10 +144,12 @@ export interface GuiSlot {
 export interface GuiItem {
   name: string;
   displayName: string;
+  displayNameSegments?: ChatSegment[];
   count: number;
   type: number;
   metadata?: number;
   lore?: string[];
+  loreSegments?: ChatSegment[][];
 }
 
 export interface BridgeConfig {

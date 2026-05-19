@@ -78,13 +78,6 @@ const newId = () => `m-${++messageCounter}-${Date.now()}`;
 const MAX_INPUT_HISTORY = 50;
 const MAX_AUTO_RECONNECTS = 6;
 const DEFAULT_TITLE_TIMING: TitleTimingState = { fadeIn: 10, stay: 70, fadeOut: 20 };
-const WEB_TITLE_BACKDROP_BLUR =
-  Platform.OS === "web"
-    ? ({
-        backdropFilter: "blur(7px)",
-        WebkitBackdropFilter: "blur(7px)",
-      } as unknown as ViewStyle)
-    : null;
 const WEB_GLASS_BLUR =
   Platform.OS === "web"
     ? ({
@@ -949,8 +942,7 @@ function ActionBarOverlay({
 function TitleOverlay({ overlay }: { overlay: TitleOverlayState }) {
   return (
     <View pointerEvents="none" style={styles.titleOverlay}>
-      <View style={[styles.titleOverlayBackdrop, WEB_TITLE_BACKDROP_BLUR]} />
-      <View style={styles.titleOverlayContent}>
+      <View style={[styles.titleOverlayContent, WEB_GLASS_BLUR]}>
         {overlay.title ? (
           <RichText
             text={overlay.title.text}
@@ -1234,9 +1226,13 @@ function GuiWindowModal({
                 contentContainerStyle={styles.guiDetailScrollContent}
                 nestedScrollEnabled
               >
-                <Text style={styles.guiDetailName} numberOfLines={2}>
-                  {itemLabel(detailItem)}
-                </Text>
+                <RichText
+                  text={itemLabel(detailItem)}
+                  segments={detailItem.displayNameSegments}
+                  style={styles.guiDetailName}
+                  onSegmentClick={noopSegmentHandler}
+                  onSegmentHover={noopSegmentHandler}
+                />
                 <Text style={styles.guiDetailMeta} numberOfLines={1}>
                   슬롯 {detailSlot?.index ?? "-"} · {detailItem.name}
                   {selectedSlot?.index === detailSlot?.index ? " · 실행 대상" : ""}
@@ -1244,12 +1240,14 @@ function GuiWindowModal({
                 {detailItem.lore?.length ? (
                   <View style={styles.guiLoreList}>
                     {detailItem.lore.map((line, index) => (
-                      <Text
+                      <RichText
                         key={`${detailItem.name}-${index}-${line}`}
+                        text={line}
+                        segments={detailItem.loreSegments?.[index]}
                         style={styles.guiLoreText}
-                      >
-                        {line}
-                      </Text>
+                        onSegmentClick={noopSegmentHandler}
+                        onSegmentHover={noopSegmentHandler}
+                      />
                     ))}
                   </View>
                 ) : (
@@ -1741,22 +1739,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 18,
   },
-  titleOverlayBackdrop: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.32)",
-  },
   titleOverlayContent: {
     maxWidth: 660,
     alignItems: "center",
     gap: 7,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     borderRadius: 18,
-    backgroundColor: "rgba(13, 17, 23, 0.14)",
+    backgroundColor: "rgba(13, 17, 23, 0.44)",
+    borderColor: "rgba(240, 246, 252, 0.12)",
+    borderWidth: 1,
   },
   titleOverlayText: {
     color: theme.text,
