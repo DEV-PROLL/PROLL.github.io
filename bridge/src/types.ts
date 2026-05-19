@@ -2,7 +2,7 @@
 // All messages are JSON over a single WebSocket connection.
 
 export type ClientMessage =
-  | { type: "auth_start"; mcVersion?: string }
+  | { type: "auth_start"; mcVersion?: string; loginRequestId?: string }
   | { type: "auth_cached"; userId: string; mcVersion?: string }
   | { type: "send"; text: string }
   | { type: "complete"; requestId: string; text: string }

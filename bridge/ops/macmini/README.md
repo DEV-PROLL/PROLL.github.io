@@ -92,6 +92,11 @@ launchctl kickstart -k gui/$(id -u)/com.proll.minecraft-bridge
 # public health
 curl https://bridge.proit.kr/health
 
+# admin endpoints require BRIDGE_TOKEN; do not paste the token into chat/logs
+curl -H "Authorization: Bearer <BRIDGE_TOKEN>" https://bridge.proit.kr/admin/status
+# browser dashboard:
+# https://bridge.proit.kr/admin/dashboard?token=<BRIDGE_TOKEN>
+
 # uninstall
 bridge/ops/macmini/uninstall-launchd.zsh
 ```

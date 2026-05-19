@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,9 +17,12 @@ import { theme } from "../theme";
 import type { ServerMessage } from "../protocol";
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import {
+  clearPendingLoginRequestId,
   getSavedAccounts,
+  getPendingLoginRequestId,
   removeSavedAccount,
   saveAccount,
+  setPendingLoginRequestId,
   type SavedAccount,
 } from "../store/settings";
 
@@ -55,9 +58,16 @@ export function LoginScreen({
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [accountToRemove, setAccountToRemove] = useState<SavedAccount | null>(null);
   const [removePending, setRemovePending] = useState(false);
+  const [pendingLoginRequestId, setPendingLoginRequestIdState] = useState<string | null>(null);
+  const openAuthRequestRef = useRef<string | null>(null);
 
   useEffect(() => {
     void getSavedAccounts().then(setAccounts);
+    void getPendingLoginRequestId().then((requestId) => {
+      if (!requestId) return;
+      setPendingLoginRequestIdState(requestId);
+      setPhase("auth_pending");
+    });
   }, []);
 
   const handleMessage = (msg: ServerMessage) => {
@@ -72,6 +82,8 @@ export function LoginScreen({
         break;
       case "auth_ok":
         setPhase("done");
+        setPendingLoginRequestIdState(null);
+        void clearPendingLoginRequestId();
         void saveAccount({
           userId: msg.userId,
           ign: msg.ign,
@@ -83,6 +95,8 @@ export function LoginScreen({
         setError(msg.reason);
         setPhase("ready");
         setDeviceCode(null);
+        setPendingLoginRequestIdState(null);
+        void clearPendingLoginRequestId();
         break;
       case "error":
         setError(msg.text);
@@ -94,20 +108,45 @@ export function LoginScreen({
 
   const { state, send } = useBridge(bridgeUrl, true, handleMessage);
 
+  const sendAuthStart = useCallback(
+    (requestId: string): boolean => {
+      const sent = send({ type: "auth_start", mcVersion, loginRequestId: requestId });
+      if (sent) openAuthRequestRef.current = requestId;
+      return sent;
+    },
+    [mcVersion, send],
+  );
+
   useEffect(() => {
     if (state === "open" && phase === "connecting") {
       setPhase("ready");
     }
   }, [state, phase]);
 
+  useEffect(() => {
+    if (state !== "open") {
+      openAuthRequestRef.current = null;
+      return;
+    }
+    if (!pendingLoginRequestId || phase === "done") return;
+    if (openAuthRequestRef.current === pendingLoginRequestId) return;
+    sendAuthStart(pendingLoginRequestId);
+  }, [pendingLoginRequestId, phase, sendAuthStart, state]);
+
   const startFresh = () => {
+    const requestId = createLoginRequestId();
     setError(null);
     setDeviceCode(null);
-    send({ type: "auth_start", mcVersion });
+    setPendingLoginRequestIdState(requestId);
+    setPhase("auth_pending");
+    void setPendingLoginRequestId(requestId);
+    sendAuthStart(requestId);
   };
 
   const startCached = (account: SavedAccount) => {
     setError(null);
+    setPendingLoginRequestIdState(null);
+    void clearPendingLoginRequestId();
     send({ type: "auth_cached", userId: account.userId, mcVersion });
   };
 
@@ -228,7 +267,9 @@ export function LoginScreen({
       {phase === "auth_pending" && deviceCode && (
         <GlassPanel style={styles.codeCard}>
           <Text style={styles.codeTitle}>Microsoft 로그인</Text>
-          <Text style={styles.note}>브라우저에서 링크를 열고 코드를 입력하세요.</Text>
+          <Text style={styles.note}>
+            브라우저에서 링크를 열고 코드를 입력한 뒤 루둘기 앱으로 돌아오세요.
+          </Text>
           <Pressable onPress={openBrowser}>
             <Text style={styles.link}>{deviceCode.url}</Text>
           </Pressable>
@@ -240,7 +281,7 @@ export function LoginScreen({
           </PrimaryButton>
           <View style={styles.waitRow}>
             <ActivityIndicator color={theme.accent} />
-            <Text style={styles.waitText}>로그인 완료 대기 중</Text>
+            <Text style={styles.waitText}>로그인 완료 대기 중 · 재연결되어도 이어받습니다</Text>
           </View>
         </GlassPanel>
       )}
@@ -337,6 +378,14 @@ function formatLastUsed(timestamp: number): string {
   if (diffDay < 7) return `${diffDay}일 전 접속`;
   const date = new Date(timestamp);
   return `${date.getMonth() + 1}/${date.getDate()} 접속`;
+}
+
+function createLoginRequestId(): string {
+  const randomSource = globalThis.crypto;
+  if (typeof randomSource?.randomUUID === "function") {
+    return randomSource.randomUUID();
+  }
+  return `login-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 const styles = StyleSheet.create({

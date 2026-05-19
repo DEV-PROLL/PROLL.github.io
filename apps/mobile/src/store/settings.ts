@@ -6,6 +6,7 @@ const KEY_SERVER_ADDRESS = "server_address";
 const KEY_USER_ID = "user_id";
 const KEY_ACCOUNTS = "accounts";
 const KEY_MC_VERSION = "mc_version";
+const KEY_PENDING_LOGIN_REQUEST_ID = "pending_login_request_id";
 
 export interface SavedAccount {
   userId: string;
@@ -52,6 +53,18 @@ export async function setCachedUserId(userId: string): Promise<void> {
 
 export async function clearCachedUserId(): Promise<void> {
   await deleteStoredItem(KEY_USER_ID);
+}
+
+export async function getPendingLoginRequestId(): Promise<string | null> {
+  return getStoredItem(KEY_PENDING_LOGIN_REQUEST_ID);
+}
+
+export async function setPendingLoginRequestId(requestId: string): Promise<void> {
+  await setStoredItem(KEY_PENDING_LOGIN_REQUEST_ID, requestId);
+}
+
+export async function clearPendingLoginRequestId(): Promise<void> {
+  await deleteStoredItem(KEY_PENDING_LOGIN_REQUEST_ID);
 }
 
 export async function getSavedAccounts(): Promise<SavedAccount[]> {
@@ -112,6 +125,7 @@ export async function saveAccount(account: {
   ];
   await setSavedAccounts(next);
   await setCachedUserId(account.userId);
+  await clearPendingLoginRequestId();
   return next;
 }
 

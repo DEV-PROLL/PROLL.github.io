@@ -501,6 +501,19 @@ export class McSession extends EventEmitter {
     };
   }
 
+  summary(): {
+    connected: boolean;
+    ign?: string;
+    playersOnline?: number;
+  } {
+    const bot = this.bot;
+    return {
+      connected: Boolean(bot && this.connected),
+      ign: bot?.username,
+      playersOnline: bot ? Object.keys(bot.players ?? {}).length : undefined,
+    };
+  }
+
   shutdown(reason: string): void {
     if (this.shuttingDown) return;
     this.shuttingDown = true;

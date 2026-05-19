@@ -5,9 +5,30 @@ interface ManagedSession {
   session: McSession;
   refCount: number;          // how many WS clients are attached
   graceTimer: NodeJS.Timeout | null; // pending shutdown when refCount drops to 0
+  createdAt: number;
+  lastAttachedAt: number;
 }
 
 const GRACE_MS = 5 * 1000;
+
+export interface ManagedSessionSummary {
+  sessionId: string;
+  userId: string;
+  mcVersion: string;
+  refCount: number;
+  connected: boolean;
+  ign?: string;
+  playersOnline?: number;
+  createdAt: number;
+  lastAttachedAt: number;
+  closing: boolean;
+}
+
+export interface SessionManagerStats {
+  active: number;
+  max: number;
+  sessions: ManagedSessionSummary[];
+}
 
 // Tracks one McSession per logged-in user. Multiple WS clients (e.g. an
 // iPhone and an iPad) can attach to the same user and share a single bot.
@@ -40,7 +61,14 @@ export class SessionManager {
         username: cacheUserId,
         profilesFolder,
       });
-      entry = { session, refCount: 0, graceTimer: null };
+      const now = Date.now();
+      entry = {
+        session,
+        refCount: 0,
+        graceTimer: null,
+        createdAt: now,
+        lastAttachedAt: now,
+      };
       this.sessions.set(sessionId, entry);
       session.start();
       session.on("ended", () => {
@@ -54,6 +82,7 @@ export class SessionManager {
       entry.graceTimer = null;
     }
     entry.refCount += 1;
+    entry.lastAttachedAt = Date.now();
 
     // Replay history to the newly-attached client.
     for (const m of entry.session.history50()) {
@@ -115,5 +144,30 @@ export class SessionManager {
       entry.session.shutdown(reason);
     }
     this.sessions.clear();
+  }
+
+  stats(): SessionManagerStats {
+    return {
+      active: this.sessions.size,
+      max: this.cfg.maxSessions,
+      sessions: [...this.sessions.entries()].map(([sessionId, entry]) => {
+        const splitAt = sessionId.lastIndexOf("@");
+        const userId = splitAt >= 0 ? sessionId.slice(0, splitAt) : sessionId;
+        const mcVersion = splitAt >= 0 ? sessionId.slice(splitAt + 1) : "";
+        const session = entry.session.summary();
+        return {
+          sessionId,
+          userId,
+          mcVersion,
+          refCount: entry.refCount,
+          connected: session.connected,
+          ign: session.ign,
+          playersOnline: session.playersOnline,
+          createdAt: entry.createdAt,
+          lastAttachedAt: entry.lastAttachedAt,
+          closing: Boolean(entry.graceTimer),
+        };
+      }),
+    };
   }
 }

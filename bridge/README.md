@@ -55,6 +55,16 @@ npx wscat -c 'ws://localhost:8080?token=change-this-long-random-token'
 - `flyctl volumes create bridge_tokens --size 1`
 - `fly.toml`의 `[mounts]`가 볼륨을 `/data`에 마운트, `TOKENS_DIR=/data/tokens` 사용.
 
+## 운영 상태 확인
+
+- 공개 liveness: `GET /health`
+- 토큰 필요 JSON: `GET /admin/status`
+- 토큰 필요 대시보드: `GET /admin/dashboard`
+
+`/admin/status`와 `/admin/dashboard`는 `BRIDGE_TOKEN`이 설정되어 있으면
+`Authorization: Bearer <BRIDGE_TOKEN>` 또는 `?token=<BRIDGE_TOKEN>` 없이는
+`401`을 반환한다. 대시보드는 운영자 점검용이며 일반 유저에게 노출하지 않는다.
+
 ## 보안 메모
 
 - 토큰은 절대 git/로그에 노출되지 않음. `.gitignore`에 `bridge/tokens/` 포함.

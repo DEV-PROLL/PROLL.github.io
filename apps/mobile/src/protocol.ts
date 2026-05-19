@@ -1,7 +1,7 @@
 // Wire protocol shared with the bridge. Keep in sync with bridge/src/types.ts.
 
 export type ClientMessage =
-  | { type: "auth_start"; mcVersion?: string }
+  | { type: "auth_start"; mcVersion?: string; loginRequestId?: string }
   | { type: "auth_cached"; userId: string; mcVersion?: string }
   | { type: "send"; text: string }
   | { type: "complete"; requestId: string; text: string }
