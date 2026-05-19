@@ -2259,6 +2259,7 @@ const styles = StyleSheet.create({
   },
   playerListBackdropTouch: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
   },
   playerListPanel: {
     width: "100%",
@@ -2269,6 +2270,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 22,
     overflow: "hidden",
+    zIndex: 1,
   },
   playerListHeader: {
     flexDirection: "row",
