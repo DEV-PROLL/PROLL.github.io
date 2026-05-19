@@ -1364,7 +1364,6 @@ function PlayerListModal({
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.playerListBackdrop}>
-        <Pressable style={styles.playerListBackdropTouch} onPress={onClose} />
         <View style={styles.playerListPanel}>
           <View style={styles.playerListHeader}>
             <View>
@@ -2257,10 +2256,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: Platform.OS === "ios" ? 26 : 14,
   },
-  playerListBackdropTouch: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 0,
-  },
   playerListPanel: {
     width: "100%",
     maxWidth: 620,
@@ -2270,7 +2265,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 22,
     overflow: "hidden",
-    zIndex: 1,
   },
   playerListHeader: {
     flexDirection: "row",
