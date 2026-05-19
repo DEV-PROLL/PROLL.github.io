@@ -113,6 +113,7 @@ export interface PlayerSummary {
   name: string;
   uuid?: string;
   displayName?: string;
+  displayNameSegments?: ChatSegment[];
   ping?: number;
 }
 

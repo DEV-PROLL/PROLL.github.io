@@ -1055,25 +1055,29 @@ function RichText({
   style,
   onSegmentClick,
   onSegmentHover,
+  numberOfLines,
+  interactive = true,
 }: {
   text: string;
   segments?: ChatSegment[];
   style: object;
   onSegmentClick: (segment: ChatSegment) => void;
   onSegmentHover: (segment: ChatSegment) => void;
+  numberOfLines?: number;
+  interactive?: boolean;
 }) {
   if (!segments?.length) {
-    return <Text style={style}>{text}</Text>;
+    return <Text style={style} numberOfLines={numberOfLines}>{text}</Text>;
   }
   return (
-    <Text style={style}>
+    <Text style={style} numberOfLines={numberOfLines}>
       {segments.map((segment, index) => {
-        const clickable = Boolean(segment.clickEvent);
-        const hoverable = Boolean(segment.hoverText);
+        const clickable = interactive && Boolean(segment.clickEvent);
+        const hoverable = interactive && Boolean(segment.hoverText);
         return (
           <Text
             key={`${index}-${segment.text}`}
-            {...webHoverProps(segment.hoverText)}
+            {...webHoverProps(interactive ? segment.hoverText : undefined)}
             style={[
               segment.color ? { color: segment.color } : null,
               segment.bold ? styles.boldText : null,
@@ -1377,12 +1381,26 @@ function PlayerListModal({
                 >
                   <MinecraftHead uuid={item.uuid} size={34} style={styles.playerRowHead} />
                   <View style={styles.playerRowCopy}>
-                    <Text style={styles.playerRowName} numberOfLines={1}>
-                      {item.name}
-                      {item.name === currentIgn ? " · 나" : ""}
-                    </Text>
+                    <RichText
+                      text={`${item.displayName || item.name}${
+                        item.name === currentIgn ? " · 나" : ""
+                      }`}
+                      segments={
+                        item.displayNameSegments
+                          ? [
+                              ...item.displayNameSegments,
+                              ...(item.name === currentIgn ? [{ text: " · 나" }] : []),
+                            ]
+                          : undefined
+                      }
+                      style={styles.playerRowName}
+                      onSegmentClick={noopSegmentHandler}
+                      onSegmentHover={noopSegmentHandler}
+                      numberOfLines={1}
+                      interactive={false}
+                    />
                     <Text style={styles.playerRowMeta} numberOfLines={1}>
-                      {item.displayName || "탭하면 귓속말 입력"}
+                      {item.displayName ? `${item.name} · 탭하면 귓속말 입력` : "탭하면 귓속말 입력"}
                     </Text>
                   </View>
                   {item.ping != null ? (

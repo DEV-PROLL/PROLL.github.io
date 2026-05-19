@@ -763,11 +763,25 @@ function serializePlayerList(bot: Bot): PlayerSummary[] {
           : key;
       const uuid = typeof normalized.uuid === "string" ? normalized.uuid : undefined;
       const displayName = componentPlainText(normalized.displayName);
+      const displayNameSegments = richSegments(normalized.displayName as never);
+      const hasStyledDisplayName = Boolean(
+        displayNameSegments?.some(
+          (segment) =>
+            segment.color ||
+            segment.bold ||
+            segment.italic ||
+            segment.underlined ||
+            segment.strikethrough,
+        ),
+      );
+      const visibleDisplayName =
+        displayName && (displayName !== name || hasStyledDisplayName) ? displayName : undefined;
       const ping = typeof normalized.ping === "number" ? normalized.ping : undefined;
       return {
         name,
         uuid,
-        displayName: displayName && displayName !== name ? displayName : undefined,
+        displayName: visibleDisplayName,
+        displayNameSegments: visibleDisplayName ? displayNameSegments : undefined,
         ping,
       };
     })
