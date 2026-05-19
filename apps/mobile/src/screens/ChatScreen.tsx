@@ -283,6 +283,8 @@ export function ChatScreen({
           }
           break;
         case "window_open":
+          textInputRef.current?.blur();
+          Keyboard.dismiss();
           setActiveWindow(msg.window);
           setSelectedWindowSlot(null);
           setPreviewWindowSlot(null);
@@ -864,27 +866,38 @@ export function ChatScreen({
 }
 
 function openExternalUrl(url: string) {
-  const trimmed = url.trim();
-  if (!/^https?:\/\//i.test(trimmed)) {
-    Alert.alert("Unsupported link", trimmed);
+  const normalized = normalizeExternalUrl(url);
+  if (!normalized) {
+    Alert.alert("지원하지 않는 링크", String(url));
     return;
   }
 
   if (Platform.OS === "web") {
     const browser = globalThis as unknown as {
       open?: (url: string, target?: string, features?: string) => unknown;
-      location?: { href: string };
     };
-    const opened = browser.open?.(trimmed, "_blank", "noopener,noreferrer");
-    if (!opened && browser.location) {
-      browser.location.href = trimmed;
+    const opened = browser.open?.(normalized, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      Alert.alert("링크 열기 실패", normalized);
     }
     return;
   }
 
-  void Linking.openURL(trimmed).catch(() => {
-    Alert.alert("Open link failed", trimmed);
+  void Linking.openURL(normalized).catch(() => {
+    Alert.alert("링크 열기 실패", normalized);
   });
+}
+
+function normalizeExternalUrl(url: string): string | null {
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (!parsed.hostname) return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
 }
 
 function BossBarStack({ bars }: { bars: BossBarSummary[] }) {
