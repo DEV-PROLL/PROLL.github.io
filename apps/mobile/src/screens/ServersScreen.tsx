@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -47,6 +48,12 @@ interface ServerStatus {
   loading: boolean;
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms?: string[];
+  readonly userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+  prompt: () => Promise<void>;
+}
+
 export function ServersScreen({ onContinue }: Props) {
   const [serverAddress, setLocalServerAddress] = useState(DEFAULT_SERVER_ADDRESS);
   const [bridgeUrl, setLocalBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
@@ -56,6 +63,10 @@ export function ServersScreen({ onContinue }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [installPrompt, setInstallPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
+  const [installDismissed, setInstallDismissed] = useState(false);
+  const [standaloneMode, setStandaloneMode] = useState(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>({
     online: null,
     max: null,
@@ -83,6 +94,29 @@ export function ServersScreen({ onContinue }: Props) {
       setAccounts(savedAccounts);
       setLoading(false);
     });
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+
+    setStandaloneMode(isStandalonePwa());
+    setInstallDismissed(readInstallDismissed());
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const handleInstalled = () => {
+      setStandaloneMode(true);
+      setInstallPrompt(null);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
   }, []);
 
   useEffect(() => {
@@ -136,7 +170,24 @@ export function ServersScreen({ onContinue }: Props) {
     setSubmitting(false);
   };
 
+  const handleInstallPress = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => null);
+    setInstallPrompt(null);
+  };
+
+  const dismissInstallHint = () => {
+    setInstallDismissed(true);
+    writeInstallDismissed();
+  };
+
   const primaryAccount = accounts[0];
+  const installHint = getInstallHint({
+    canPrompt: Boolean(installPrompt),
+    dismissed: installDismissed,
+    standalone: standaloneMode,
+  });
 
   if (loading) {
     return (
@@ -242,6 +293,37 @@ export function ServersScreen({ onContinue }: Props) {
       <Text style={styles.help}>
         Microsoft 계정으로 로그인하면 서버 채팅과 명령어를 사용할 수 있습니다.
       </Text>
+
+      {installHint ? (
+        <GlassPanel style={styles.installCard}>
+          <View style={styles.installCopy}>
+            <Text style={styles.installTitle}>홈 화면 앱</Text>
+            <Text style={styles.installText}>{installHint.text}</Text>
+          </View>
+          <View style={styles.installActions}>
+            {installPrompt ? (
+              <PrimaryButton
+                variant="secondary"
+                onPress={handleInstallPress}
+                style={styles.installButton}
+                textStyle={styles.installButtonText}
+              >
+                앱 설치
+              </PrimaryButton>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              onPress={dismissInstallHint}
+              style={({ pressed }) => [
+                styles.installDismiss,
+                pressed ? styles.installDismissPressed : null,
+              ]}
+            >
+              <Text style={styles.installDismissText}>닫기</Text>
+            </Pressable>
+          </View>
+        </GlassPanel>
+      ) : null}
     </ScrollView>
   );
 }
@@ -309,6 +391,74 @@ function formatOnlineStatus(status: ServerStatus): string {
   if (!status.ok || status.online == null) return "상태 확인 불가";
   if (status.max != null) return `온라인 ${status.online}/${status.max}명`;
   return `온라인 ${status.online}명`;
+}
+
+function isStandalonePwa(): boolean {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  const navigatorStandalone =
+    "standalone" in window.navigator
+      ? Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone)
+      : false;
+  return (
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    window.matchMedia?.("(display-mode: fullscreen)")?.matches ||
+    navigatorStandalone
+  );
+}
+
+function getInstallHint({
+  canPrompt,
+  dismissed,
+  standalone,
+}: {
+  canPrompt: boolean;
+  dismissed: boolean;
+  standalone: boolean;
+}): { text: string } | null {
+  if (Platform.OS !== "web" || dismissed || standalone) return null;
+
+  if (isIosLike()) {
+    return {
+      text: "Safari 공유 버튼에서 홈 화면에 추가하면 주소창 없이 열립니다.",
+    };
+  }
+  if (canPrompt) {
+    return {
+      text: "설치하면 주소창 없이 바로 열 수 있습니다.",
+    };
+  }
+  return {
+    text: "브라우저 메뉴에서 홈 화면에 추가할 수 있습니다.",
+  };
+}
+
+function isIosLike(): boolean {
+  if (Platform.OS !== "web" || typeof navigator === "undefined") return false;
+  const platform = navigator.platform || "";
+  const ua = navigator.userAgent || "";
+  return (
+    /iPad|iPhone|iPod/.test(platform) ||
+    (/Mac/.test(platform) && typeof document !== "undefined" && "ontouchend" in document) ||
+    /iPad|iPhone|iPod/.test(ua)
+  );
+}
+
+function readInstallDismissed(): boolean {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  try {
+    return window.localStorage?.getItem("rudulgi-install-dismissed") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeInstallDismissed() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return;
+  try {
+    window.localStorage?.setItem("rudulgi-install-dismissed", "1");
+  } catch {
+    // Ignore private browsing or blocked storage.
+  }
 }
 
 const styles = StyleSheet.create({
@@ -442,5 +592,52 @@ const styles = StyleSheet.create({
     marginTop: 24,
     textAlign: "center",
     lineHeight: 18,
+  },
+  installCard: {
+    width: "100%",
+    maxWidth: 520,
+    marginTop: 14,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  installCopy: {
+    flex: 1,
+  },
+  installTitle: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  installText: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  installActions: {
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  installButton: {
+    minHeight: 40,
+    borderRadius: 13,
+    paddingHorizontal: 14,
+  },
+  installButtonText: {
+    fontSize: 13,
+  },
+  installDismiss: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  installDismissPressed: {
+    opacity: 0.65,
+  },
+  installDismissText: {
+    color: theme.textDim,
+    fontSize: 12,
+    fontWeight: "800",
   },
 });
