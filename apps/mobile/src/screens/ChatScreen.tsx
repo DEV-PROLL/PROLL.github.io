@@ -1363,8 +1363,9 @@ function PlayerListModal({
 }) {
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.playerListBackdrop} onPress={onClose}>
-        <Pressable style={styles.playerListPanel}>
+      <View style={styles.playerListBackdrop}>
+        <Pressable style={styles.playerListBackdropTouch} onPress={onClose} />
+        <View style={styles.playerListPanel}>
           <View style={styles.playerListHeader}>
             <View>
               <Text style={styles.playerListTitle}>온라인 플레이어</Text>
@@ -1427,8 +1428,8 @@ function PlayerListModal({
               서버가 플레이어 목록을 아직 보내지 않았습니다.
             </Text>
           )}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -2255,6 +2256,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.45)",
     paddingHorizontal: 14,
     paddingBottom: Platform.OS === "ios" ? 26 : 14,
+  },
+  playerListBackdropTouch: {
+    ...StyleSheet.absoluteFillObject,
   },
   playerListPanel: {
     width: "100%",
