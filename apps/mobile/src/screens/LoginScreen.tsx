@@ -61,6 +61,7 @@ export function LoginScreen({
   const [accountToRemove, setAccountToRemove] = useState<SavedAccount | null>(null);
   const [removePending, setRemovePending] = useState(false);
   const [pendingLoginRequestId, setPendingLoginRequestIdState] = useState<string | null>(null);
+  const [authHint, setAuthHint] = useState<string | null>(null);
   const openAuthRequestRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -75,6 +76,7 @@ export function LoginScreen({
   const handleMessage = (msg: ServerMessage) => {
     switch (msg.type) {
       case "auth_code":
+        setAuthHint(null);
         setDeviceCode({
           code: msg.code,
           url: msg.verificationUri,
@@ -83,6 +85,7 @@ export function LoginScreen({
         setPhase("auth_pending");
         break;
       case "auth_ok":
+        setAuthHint(null);
         setPhase("done");
         setPendingLoginRequestIdState(null);
         void clearPendingLoginRequestId();
@@ -94,6 +97,7 @@ export function LoginScreen({
         onAuthenticated({ ign: msg.ign, userId: msg.userId, uuid: msg.uuid });
         break;
       case "auth_failed":
+        setAuthHint(null);
         setError(msg.reason);
         setPhase("ready");
         setDeviceCode(null);
@@ -138,6 +142,7 @@ export function LoginScreen({
   const startFresh = () => {
     const requestId = createLoginRequestId();
     setError(null);
+    setAuthHint(null);
     setDeviceCode(null);
     setPendingLoginRequestIdState(requestId);
     setPhase("auth_pending");
@@ -147,6 +152,7 @@ export function LoginScreen({
 
   const startCached = (account: SavedAccount) => {
     setError(null);
+    setAuthHint(null);
     setPendingLoginRequestIdState(null);
     void clearPendingLoginRequestId();
     send({ type: "auth_cached", userId: account.userId, serverId, mcVersion });
@@ -192,11 +198,39 @@ export function LoginScreen({
   const copyCode = async () => {
     if (!deviceCode) return;
     await Clipboard.setStringAsync(deviceCode.code);
+    setAuthHint("인증 코드가 복사되었습니다.");
   };
 
   const openBrowser = async () => {
     if (!deviceCode) return;
+    await copyCode();
+    if (Platform.OS === "web") {
+      const browserWindow = (
+        globalThis as typeof globalThis & {
+          window?: { open?: (url?: string, target?: string, features?: string) => unknown };
+        }
+      ).window;
+      browserWindow?.open?.(deviceCode.url, "_blank", "noopener,noreferrer");
+      setAuthHint("인증 후 루둘기 앱 탭으로 돌아와 주세요.");
+      return;
+    }
     await WebBrowser.openBrowserAsync(deviceCode.url);
+    setAuthHint("인증 후 루둘기 앱으로 돌아오면 자동으로 이어받습니다.");
+  };
+
+  const resumePendingLogin = () => {
+    if (!pendingLoginRequestId) {
+      setAuthHint("로그인 요청이 없습니다. 다시 로그인을 시작해 주세요.");
+      return;
+    }
+    setError(null);
+    openAuthRequestRef.current = null;
+    const sent = sendAuthStart(pendingLoginRequestId);
+    setAuthHint(
+      sent
+        ? "로그인 완료 여부를 다시 확인 중입니다."
+        : "브릿지 연결이 열리면 자동으로 이어받습니다.",
+    );
   };
 
   return (
@@ -278,9 +312,26 @@ export function LoginScreen({
           <Pressable onPress={copyCode}>
             <Text style={styles.codeText}>{deviceCode.code}</Text>
           </Pressable>
-          <PrimaryButton variant="secondary" onPress={copyCode} style={styles.copyButton}>
-            코드 복사
+          <View style={styles.authActionRow}>
+            <PrimaryButton onPress={openBrowser} style={styles.authActionButton}>
+              인증 페이지 열기
+            </PrimaryButton>
+            <PrimaryButton
+              variant="secondary"
+              onPress={copyCode}
+              style={styles.authActionButton}
+            >
+              코드 복사
+            </PrimaryButton>
+          </View>
+          <PrimaryButton
+            variant="secondary"
+            onPress={resumePendingLogin}
+            style={styles.resumeButton}
+          >
+            완료 확인
           </PrimaryButton>
+          {authHint ? <Text style={styles.authHint}>{authHint}</Text> : null}
           <View style={styles.waitRow}>
             <ActivityIndicator color={theme.accent} />
             <Text style={styles.waitText}>로그인 완료 대기 중 · 재연결되어도 이어받습니다</Text>
@@ -544,8 +595,26 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 16,
   },
-  copyButton: {
+  authActionRow: {
     alignSelf: "stretch",
+    flexDirection: "row",
+    gap: 10,
+  },
+  authActionButton: {
+    flex: 1,
+    minHeight: 52,
+  },
+  resumeButton: {
+    alignSelf: "stretch",
+    minHeight: 50,
+    marginTop: 10,
+  },
+  authHint: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 12,
+    textAlign: "center",
   },
   waitRow: {
     flexDirection: "row",

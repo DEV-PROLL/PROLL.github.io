@@ -104,6 +104,7 @@ export function ChatScreen({
   const [completionMatches, setCompletionMatches] = useState<CompletionMatch[]>([]);
   const [playerList, setPlayerList] = useState<PlayerSummary[]>([]);
   const [playerListOpen, setPlayerListOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
   const [actionBar, setActionBar] = useState<ActionBarState | null>(null);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlayState | null>(null);
@@ -652,15 +653,9 @@ export function ChatScreen({
   };
 
   const handleLogoutInternal = () => {
+    setOverflowOpen(false);
     send({ type: "logout" });
     onLogout();
-  };
-
-  const confirmLogout = () => {
-    Alert.alert("Sign out?", `Disconnect ${ign} from the server.`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Sign out", style: "destructive", onPress: handleLogoutInternal },
-    ]);
   };
 
   const handlePlayerSelect = (player: PlayerSummary) => {
@@ -714,7 +709,15 @@ export function ChatScreen({
                 </Text>
               </Pressable>
             </View>
-            <Pressable style={styles.logoutBtn} onPress={confirmLogout}>
+            <Pressable
+              accessibilityLabel="채팅 메뉴"
+              accessibilityRole="button"
+              style={({ pressed }) => [
+                styles.logoutBtn,
+                pressed ? styles.logoutBtnPressed : null,
+              ]}
+              onPress={() => setOverflowOpen(true)}
+            >
               <Text style={styles.logoutText}>•••</Text>
             </Pressable>
           </View>
@@ -852,6 +855,28 @@ export function ChatScreen({
         {tooltipText ? (
           <TooltipModal text={tooltipText} onClose={() => setTooltipText(null)} />
         ) : null}
+
+        <OverflowMenuModal
+          visible={overflowOpen}
+          ign={ign}
+          uuid={uuid}
+          serverAddress={serverAddress}
+          mcVersion={mcVersion}
+          onlineCount={onlineCount}
+          connected={serverInfo.connected}
+          state={state}
+          phase={serverInfo.phase}
+          onClose={() => setOverflowOpen(false)}
+          onReconnect={() => {
+            setOverflowOpen(false);
+            reconnect(true);
+          }}
+          onOpenPlayers={() => {
+            setOverflowOpen(false);
+            setPlayerListOpen(true);
+          }}
+          onLogout={handleLogoutInternal}
+        />
 
         {playerListOpen ? (
           <PlayerListModal
@@ -1350,6 +1375,111 @@ function TooltipModal({ text, onClose }: { text: string; onClose: () => void }) 
   );
 }
 
+function OverflowMenuModal({
+  visible,
+  ign,
+  uuid,
+  serverAddress,
+  mcVersion,
+  onlineCount,
+  connected,
+  state,
+  phase,
+  onClose,
+  onReconnect,
+  onOpenPlayers,
+  onLogout,
+}: {
+  visible: boolean;
+  ign: string;
+  uuid?: string;
+  serverAddress: string;
+  mcVersion: string;
+  onlineCount?: number;
+  connected: boolean;
+  state: ConnectionState;
+  phase: "joining" | "online" | "offline" | "kicked";
+  onClose: () => void;
+  onReconnect: () => void;
+  onOpenPlayers: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.overflowBackdrop}>
+        <Pressable style={styles.overflowBackdropTouch} onPress={onClose} />
+        <View style={[styles.overflowPanel, WEB_GLASS_BLUR]}>
+          <View style={styles.overflowHeader}>
+            <MinecraftHead uuid={uuid} size={48} style={styles.overflowHead} />
+            <View style={styles.overflowCopy}>
+              <Text style={styles.overflowTitle} numberOfLines={1}>
+                {ign}
+              </Text>
+              <Text style={styles.overflowMeta} numberOfLines={1}>
+                {serverAddress} · MC {mcVersion}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.overflowStatusRow}>
+            <ConnectionPill state={state} connected={connected} phase={phase} />
+            <Text style={styles.overflowOnlineText}>
+              {onlineCount != null ? `${onlineCount}명 접속 중` : "인원 수신 대기"}
+            </Text>
+          </View>
+
+          <View style={styles.overflowRows}>
+            <OverflowMenuRow
+              title="재접속"
+              subtitle="현재 계정으로 서버 연결을 다시 시도합니다"
+              onPress={onReconnect}
+            />
+            <OverflowMenuRow
+              title="플레이어 목록"
+              subtitle="탭하면 귓속말 입력창에 닉네임을 불러옵니다"
+              onPress={onOpenPlayers}
+            />
+            <OverflowMenuRow
+              title="계정 선택으로 나가기"
+              subtitle="현재 세션을 끊고 다른 계정으로 접속합니다"
+              danger
+              onPress={onLogout}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function OverflowMenuRow({
+  title,
+  subtitle,
+  danger = false,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  danger?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      style={({ pressed }) => [
+        styles.overflowRow,
+        pressed ? styles.overflowRowPressed : null,
+      ]}
+      onPress={onPress}
+    >
+      <Text style={[styles.overflowRowTitle, danger ? styles.overflowRowDanger : null]}>
+        {title}
+      </Text>
+      <Text style={styles.overflowRowSubtitle}>{subtitle}</Text>
+    </Pressable>
+  );
+}
+
 function PlayerListModal({
   players,
   onlineCount,
@@ -1689,6 +1819,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 19,
     backgroundColor: "rgba(240, 246, 252, 0.06)",
+  },
+  logoutBtnPressed: {
+    opacity: 0.78,
+    transform: [{ scale: 0.96 }],
+    backgroundColor: "rgba(240, 246, 252, 0.1)",
   },
   logoutText: {
     color: theme.textDim,
@@ -2250,6 +2385,96 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 13,
     fontWeight: "800",
+  },
+  overflowBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.42)",
+    paddingHorizontal: 14,
+    paddingBottom: Platform.OS === "ios" ? 26 : 14,
+  },
+  overflowBackdropTouch: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+  overflowPanel: {
+    width: "100%",
+    maxWidth: 420,
+    alignSelf: "center",
+    zIndex: 1,
+    backgroundColor: "rgba(13, 17, 23, 0.98)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+  },
+  overflowHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  overflowHead: {
+    flexShrink: 0,
+  },
+  overflowCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  overflowTitle: {
+    color: theme.text,
+    fontSize: 19,
+    fontWeight: "900",
+  },
+  overflowMeta: {
+    color: theme.textDim,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  overflowStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingTop: 14,
+    paddingBottom: 12,
+    borderBottomColor: theme.glassBorder,
+    borderBottomWidth: 1,
+  },
+  overflowOnlineText: {
+    color: theme.textDim,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  overflowRows: {
+    paddingTop: 8,
+    gap: 4,
+  },
+  overflowRow: {
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  overflowRowPressed: {
+    backgroundColor: "rgba(240, 246, 252, 0.08)",
+    transform: [{ scale: 0.99 }],
+  },
+  overflowRowTitle: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  overflowRowDanger: {
+    color: theme.danger,
+  },
+  overflowRowSubtitle: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
   },
   playerListBackdrop: {
     flex: 1,
