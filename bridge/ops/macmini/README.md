@@ -43,7 +43,7 @@ MC_HOST=99999.kr
 MC_PORT=25565
 MC_VERSION=1.21.11
 # Optional. Omit this for 루둘기-only operation.
-# SERVER_PROFILES=[{"id":"rudulgi","name":"루둘기","host":"99999.kr","port":25565,"version":"1.21.11","publicAddress":"99999.kr"}]
+# SERVER_PROFILES=[{"id":"ludulgi","name":"루둘기","host":"99999.kr","port":25565,"version":"1.21.11","publicAddress":"99999.kr"}]
 WS_PORT=8080
 BRIDGE_TOKEN=<long-random-secret>
 TOKENS_DIR=./bridge/tokens

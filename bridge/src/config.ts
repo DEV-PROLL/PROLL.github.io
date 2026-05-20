@@ -25,7 +25,7 @@ export function loadConfig(): BridgeConfig {
   const mcPort = num("MC_PORT", 25565);
   const mcVersion = assertSupportedMcVersion(str("MC_VERSION", "1.21.11"));
   const defaultProfile: BridgeServerProfile = {
-    id: "rudulgi",
+    id: "ludulgi",
     name: "루둘기",
     host: mcHost,
     port: mcPort,

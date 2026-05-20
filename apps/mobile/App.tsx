@@ -11,7 +11,7 @@ import {
   getServerId,
 } from "./src/store/settings";
 import { DEFAULT_MC_VERSION } from "./src/mcVersions";
-import { DEFAULT_SERVER_ADDRESS, DEFAULT_SERVER_ID } from "./src/appConfig";
+import { DEFAULT_SERVER_ADDRESS, normalizeServerId } from "./src/appConfig";
 
 type Phase =
   | { name: "loading" }
@@ -40,7 +40,7 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       const url = await getBridgeUrl();
-      const serverId = (await getServerId()) ?? DEFAULT_SERVER_ID;
+      const serverId = normalizeServerId(await getServerId());
       const mcVersion = (await getMcVersion()) ?? DEFAULT_MC_VERSION;
       const serverAddress = (await getServerAddress()) ?? DEFAULT_SERVER_ADDRESS;
       if (!url) {

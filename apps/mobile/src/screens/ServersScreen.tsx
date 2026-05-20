@@ -14,6 +14,7 @@ import {
   DEFAULT_SERVER_ADDRESS,
   DEFAULT_SERVER_ID,
   DEFAULT_SERVER_LABEL,
+  normalizeServerId,
 } from "../appConfig";
 import {
   DEFAULT_MC_VERSION,
@@ -88,7 +89,7 @@ export function ServersScreen({ onContinue }: Props) {
       getServerAddress(),
       getSavedAccounts(),
     ]).then(([storedBridgeUrl, storedServerId, version, address, savedAccounts]) => {
-      if (storedServerId) setLocalServerId(storedServerId);
+      setLocalServerId(normalizeServerId(storedServerId));
       if (address) setLocalServerAddress(address);
       const effectiveBridgeUrl = resolveInitialBridgeUrl(storedBridgeUrl);
       if (effectiveBridgeUrl) {
@@ -163,7 +164,7 @@ export function ServersScreen({ onContinue }: Props) {
       return;
     }
 
-    const normalizedServerId = serverId.trim().toLowerCase();
+    const normalizedServerId = normalizeServerId(serverId);
     if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(normalizedServerId)) {
       setFormError("서버 ID 설정이 올바르지 않습니다.");
       setSubmitting(false);

@@ -1140,10 +1140,12 @@ function resolveServerProfile(
   if (!fallback) throw new Error("no server profiles configured");
   if (!id) return fallback;
   const profile = cfg.serverProfiles.find((candidate) => candidate.id === id);
-  if (!profile) {
-    throw new Error(`unknown server profile: ${id}`);
+  if (profile) return profile;
+  if (id === "rudulgi") {
+    const renamedProfile = cfg.serverProfiles.find((candidate) => candidate.id === "ludulgi");
+    if (renamedProfile) return renamedProfile;
   }
-  return profile;
+  throw new Error(`unknown server profile: ${id}`);
 }
 
 function resolveMcVersion(requested: string | undefined, fallback: string): string {

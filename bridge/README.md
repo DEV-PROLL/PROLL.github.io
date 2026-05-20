@@ -17,7 +17,7 @@
 | 변수 | 설명 |
 | --- | --- |
 | `MC_HOST` / `MC_PORT` / `MC_VERSION` | 대상 마크 서버 |
-| `SERVER_PROFILES` | 선택 사항. 여러 서버를 JSON 배열로 정의. 없으면 `rudulgi` 단일 프로필이 `MC_*` 값으로 자동 생성됨 |
+| `SERVER_PROFILES` | 선택 사항. 여러 서버를 JSON 배열로 정의. 없으면 `ludulgi` 단일 프로필이 `MC_*` 값으로 자동 생성됨 |
 | `WS_PORT` | WebSocket(+HTTP) 포트, `/health` 엔드포인트 동일 포트 |
 | `BRIDGE_TOKEN` | 공개 브릿지에서는 필수. 설정 시 `Authorization: Bearer ...` 또는 `ws://host:port?token=...`로만 접속 허용 |
 | `TOKENS_DIR` | 유저별 토큰 캐시 폴더 (운영 시 영구 볼륨) |
@@ -37,10 +37,10 @@ npm run dev
 다중 서버 준비 예시:
 
 ```ini
-SERVER_PROFILES=[{"id":"rudulgi","name":"루둘기","host":"99999.kr","port":25565,"version":"1.21.11","publicAddress":"99999.kr"},{"id":"nspring","name":"Nspring","host":"nspring.kr","port":25565,"version":"1.21.4","publicAddress":"nspring.kr"},{"id":"nef","name":"NEF","host":"nef.kr","port":25565,"version":"1.21.4","publicAddress":"nef.kr"}]
+SERVER_PROFILES=[{"id":"ludulgi","name":"루둘기","host":"99999.kr","port":25565,"version":"1.21.11","publicAddress":"99999.kr"},{"id":"nspring","name":"Nspring","host":"nspring.kr","port":25565,"version":"1.21.4","publicAddress":"nspring.kr"},{"id":"nef","name":"NEF","host":"nef.kr","port":25565,"version":"1.21.4","publicAddress":"nef.kr"}]
 ```
 
-현재 PWA는 일반 유저에게 `rudulgi`만 노출한다. 다른 서버는 운영자가 앱 UI를
+현재 PWA는 일반 유저에게 `ludulgi`만 노출한다. 다른 서버는 운영자가 앱 UI를
 열기 전까지 브릿지 프로필로만 준비해 둘 수 있다.
 
 WS 클라이언트로 빠르게 테스트:

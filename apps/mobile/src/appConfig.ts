@@ -1,8 +1,14 @@
 import { Platform } from "react-native";
 
 export const DEFAULT_SERVER_ADDRESS = "99999.kr";
-export const DEFAULT_SERVER_ID = "rudulgi";
+export const DEFAULT_SERVER_ID = "ludulgi";
 export const DEFAULT_SERVER_LABEL = "루둘기";
+
+export function normalizeServerId(value: string | null | undefined): string {
+  const trimmed = value?.trim().toLowerCase();
+  if (!trimmed || trimmed === "rudulgi") return DEFAULT_SERVER_ID;
+  return trimmed;
+}
 
 const runtimeBridgeUrl =
   typeof globalThis !== "undefined"
