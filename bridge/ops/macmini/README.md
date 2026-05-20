@@ -47,7 +47,7 @@ MC_VERSION=1.21.11
 WS_PORT=8080
 BRIDGE_TOKEN=<long-random-secret>
 TOKENS_DIR=./bridge/tokens
-ALLOWED_ORIGINS=https://<your-web-domain>
+ALLOWED_ORIGINS=https://app.99999.kr
 MAX_SESSIONS=20
 CHAT_RATE_LIMIT=2
 ```
