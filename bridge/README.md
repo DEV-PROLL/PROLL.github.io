@@ -58,12 +58,13 @@ npx wscat -c 'ws://localhost:8080?token=change-this-long-random-token'
 ## 운영 상태 확인
 
 - 공개 liveness: `GET /health`
-- 토큰 필요 JSON: `GET /admin/status`
-- 토큰 필요 대시보드: `GET /admin/dashboard`
+- 로컬 전용 JSON: `GET /admin/status`
+- 로컬 전용 대시보드: `GET /admin/dashboard`
 
-`/admin/status`와 `/admin/dashboard`는 `BRIDGE_TOKEN`이 설정되어 있으면
-`Authorization: Bearer <BRIDGE_TOKEN>` 또는 `?token=<BRIDGE_TOKEN>` 없이는
-`401`을 반환한다. 대시보드는 운영자 점검용이며 일반 유저에게 노출하지 않는다.
+`/admin/status`와 `/admin/dashboard`는 SSH 터널 또는 맥미니 로컬 브라우저에서만
+토큰 없이 열린다. Cloudflare Tunnel 같은 외부 프록시를 거치거나 `bridge.proit.kr`로
+직접 접근하면 `404`를 반환한다. 대시보드는 운영자 점검용이며 일반 유저에게
+노출하지 않는다.
 
 ## 보안 메모
 

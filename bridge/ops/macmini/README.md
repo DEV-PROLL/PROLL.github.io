@@ -92,10 +92,11 @@ launchctl kickstart -k gui/$(id -u)/com.proll.minecraft-bridge
 # public health
 curl https://bridge.proit.kr/health
 
-# admin endpoints require BRIDGE_TOKEN; do not paste the token into chat/logs
-curl -H "Authorization: Bearer <BRIDGE_TOKEN>" https://bridge.proit.kr/admin/status
-# browser dashboard:
-# https://bridge.proit.kr/admin/dashboard?token=<BRIDGE_TOKEN>
+# admin endpoints are local-only. Use an SSH tunnel from another machine:
+ssh -N -L 18080:127.0.0.1:8080 podo@100.104.132.2
+# then open:
+# http://127.0.0.1:18080/admin/dashboard
+# direct Cloudflare access to /admin/* should return 404.
 
 # uninstall
 bridge/ops/macmini/uninstall-launchd.zsh

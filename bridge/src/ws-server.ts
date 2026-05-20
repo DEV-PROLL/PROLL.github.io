@@ -232,9 +232,9 @@ async function handleHttpRequest(
   }
 
   if (url.pathname === "/admin/status") {
-    if (!isAuthorizedRequest(req, cfg, url)) {
-      res.writeHead(401, { ...headers, "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "invalid bridge token" }));
+    if (!isLocalAdminRequest(req)) {
+      res.writeHead(404, { ...headers, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "not found" }));
       return;
     }
     res.writeHead(200, {
@@ -247,9 +247,9 @@ async function handleHttpRequest(
   }
 
   if (url.pathname === "/admin/dashboard") {
-    if (!isAuthorizedRequest(req, cfg, url)) {
-      res.writeHead(401, { ...headers, "Content-Type": "text/plain; charset=utf-8" });
-      res.end("invalid bridge token");
+    if (!isLocalAdminRequest(req)) {
+      res.writeHead(404, { ...headers, "Content-Type": "text/plain; charset=utf-8" });
+      res.end("not found");
       return;
     }
     res.writeHead(200, {
@@ -279,6 +279,46 @@ function isAuthorizedRequest(
       : null;
   const queryToken = url.searchParams.get("token");
   return queryToken === cfg.bridgeToken || bearerToken === cfg.bridgeToken;
+}
+
+function isLocalAdminRequest(req: http.IncomingMessage): boolean {
+  return (
+    isLoopbackAddress(req.socket.remoteAddress) &&
+    hasLocalHostHeader(req.headers.host) &&
+    !hasProxyForwardingHeaders(req.headers)
+  );
+}
+
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function hasLocalHostHeader(host: string | undefined): boolean {
+  if (!host) return false;
+  const normalized = host.trim().toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized.startsWith("localhost:") ||
+    normalized === "127.0.0.1" ||
+    normalized.startsWith("127.0.0.1:") ||
+    normalized === "[::1]" ||
+    normalized.startsWith("[::1]:")
+  );
+}
+
+function hasProxyForwardingHeaders(headers: http.IncomingHttpHeaders): boolean {
+  return [
+    "cf-connecting-ip",
+    "cf-ray",
+    "cf-visitor",
+    "cdn-loop",
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip",
+  ].some((name) => headers[name] !== undefined);
 }
 
 function rawDataSize(data: RawData): number {
@@ -417,7 +457,6 @@ function renderAdminDashboard(): string {
     </section>
   </main>
   <script>
-    const params = window.location.search || "";
     const fmtTime = (ts) => ts ? new Date(ts).toLocaleString("ko-KR") : "-";
     const el = (tag, text, className) => {
       const node = document.createElement(tag);
@@ -473,7 +512,7 @@ function renderAdminDashboard(): string {
     }
     async function refresh() {
       try {
-        const res = await fetch("/admin/status" + params, { cache: "no-store" });
+        const res = await fetch("/admin/status", { cache: "no-store" });
         render(await res.json());
       } catch (err) {
         document.getElementById("subtitle").textContent = "상태 조회 실패: " + err;
