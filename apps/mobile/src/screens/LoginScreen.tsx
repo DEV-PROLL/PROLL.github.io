@@ -140,6 +140,10 @@ export function LoginScreen({
   }, [pendingLoginRequestId, phase, sendAuthStart, state]);
 
   const startFresh = () => {
+    if (state !== "open") {
+      setError("브릿지 서버와 연결 중입니다. 잠시 후 다시 시도하세요.");
+      return;
+    }
     const requestId = createLoginRequestId();
     setError(null);
     setAuthHint(null);
@@ -151,6 +155,10 @@ export function LoginScreen({
   };
 
   const startCached = (account: SavedAccount) => {
+    if (state !== "open") {
+      setError("브릿지 서버와 연결 중입니다. 잠시 후 다시 시도하세요.");
+      return;
+    }
     setError(null);
     setAuthHint(null);
     setPendingLoginRequestIdState(null);
@@ -298,6 +306,23 @@ export function LoginScreen({
             Microsoft 계정으로 로그인
           </PrimaryButton>
         </View>
+      )}
+
+      {phase === "auth_pending" && !deviceCode && (
+        <GlassPanel style={styles.centerCard}>
+          <ActivityIndicator color={theme.accent} />
+          <Text style={styles.note}>
+            Microsoft 인증 코드를 요청 중입니다. 화면이 멈춘 것 같으면 다시 확인을 눌러주세요.
+          </Text>
+          <PrimaryButton
+            variant="secondary"
+            onPress={resumePendingLogin}
+            style={styles.pendingResumeButton}
+          >
+            다시 확인
+          </PrimaryButton>
+          {authHint ? <Text style={styles.authHint}>{authHint}</Text> : null}
+        </GlassPanel>
       )}
 
       {phase === "auth_pending" && deviceCode && (
@@ -608,6 +633,11 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     minHeight: 50,
     marginTop: 10,
+  },
+  pendingResumeButton: {
+    alignSelf: "stretch",
+    minHeight: 50,
+    marginTop: 18,
   },
   authHint: {
     color: theme.accent,
