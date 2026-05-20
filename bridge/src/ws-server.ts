@@ -16,6 +16,7 @@ interface ClientState {
   ws: WebSocket;
   sessionKey: string;          // unique per WS connection
   userId: string | null;       // populated after auth_ok
+  authenticatedUserId: string | null; // retained after temporary bot disconnects
   sessionId: string | null;    // user + version key in SessionManager
   mcSession: McSession | null; // populated after auth_ok
   listener: ((msg: ServerMessage) => void) | null;
@@ -66,7 +67,11 @@ interface MemorySample {
 interface RuntimeStats {
   startedAt: number;
   activeWs: number;
+  activeAnonymousWs: number;
   totalWs: number;
+  anonymousWsOpens: number;
+  anonymousWsCloses: number;
+  authenticatedWsCloses: number;
   rejectedToken: number;
   rejectedOrigin: number;
   messagesIn: number;
@@ -103,7 +108,11 @@ export function startWsServer(
   const stats: RuntimeStats = {
     startedAt: Date.now(),
     activeWs: 0,
+    activeAnonymousWs: 0,
     totalWs: 0,
+    anonymousWsOpens: 0,
+    anonymousWsCloses: 0,
+    authenticatedWsCloses: 0,
     rejectedToken: 0,
     rejectedOrigin: 0,
     messagesIn: 0,
@@ -149,12 +158,14 @@ export function startWsServer(
 
   wss.on("connection", (ws) => {
     stats.activeWs += 1;
+    stats.activeAnonymousWs += 1;
     stats.totalWs += 1;
-    recordEvent(stats, "ws_open", maskedClientIp(wsRemoteAddress(ws)));
+    stats.anonymousWsOpens += 1;
     const state: ClientState = {
       ws,
       sessionKey: randomUUID(),
       userId: null,
+      authenticatedUserId: null,
       sessionId: null,
       mcSession: null,
       listener: null,
@@ -196,7 +207,13 @@ export function startWsServer(
 
     ws.on("close", () => {
       stats.activeWs = Math.max(0, stats.activeWs - 1);
-      recordEvent(stats, "ws_close", state.userId ? "authenticated" : "anonymous");
+      if (state.authenticatedUserId) {
+        stats.authenticatedWsCloses += 1;
+        recordEvent(stats, "ws_close", state.authenticatedUserId);
+      } else {
+        stats.activeAnonymousWs = Math.max(0, stats.activeAnonymousWs - 1);
+        stats.anonymousWsCloses += 1;
+      }
       if (state.sessionId && state.listener) {
         sessions.detach(state.sessionId, state.listener);
       }
@@ -457,10 +474,6 @@ function maskedClientIp(source: unknown): string {
   return parts.length > 2 ? `${parts.slice(0, 2).join(":")}::` : ip;
 }
 
-function wsRemoteAddress(ws: WebSocket): { remoteAddress?: string } {
-  return (ws as unknown as { _socket?: { remoteAddress?: string } })._socket ?? {};
-}
-
 function buildAdminStatus(
   cfg: BridgeConfig,
   stats: RuntimeStats,
@@ -502,7 +515,11 @@ function buildAdminStatus(
     },
     websocket: {
       active: stats.activeWs,
+      activeAnonymous: stats.activeAnonymousWs,
       total: stats.totalWs,
+      anonymousOpens: stats.anonymousWsOpens,
+      anonymousCloses: stats.anonymousWsCloses,
+      authenticatedCloses: stats.authenticatedWsCloses,
       rejectedToken: stats.rejectedToken,
       rejectedOrigin: stats.rejectedOrigin,
       messagesIn: stats.messagesIn,
@@ -627,6 +644,7 @@ function renderAdminDashboard(): string {
         .join(", ");
       cards.replaceChildren(
         card("Active WS", data.websocket.active, "총 " + data.websocket.total + "회 연결"),
+        card("Pre-auth WS", data.websocket.activeAnonymous, "open " + data.websocket.anonymousOpens + " · close " + data.websocket.anonymousCloses),
         card("Sessions", data.sessions.active + "/" + data.sessions.max, activeNames || "활성 계정 없음"),
         card("Profiles", (data.serverProfiles || []).length, profileNames || "기본 서버"),
         card("Reconnects", reconnects, "재사용 " + data.counters.sessionReuses + " · 유예복구 " + data.counters.graceReconnects),
@@ -1100,7 +1118,11 @@ function attachToSession(
       stats.graceReconnects += 1;
       recordEvent(stats, "session_resume", sessionId);
     }
+    if (!state.authenticatedUserId) {
+      stats.activeAnonymousWs = Math.max(0, stats.activeAnonymousWs - 1);
+    }
     state.userId = userId;
+    state.authenticatedUserId = userId;
     state.sessionId = sessionId;
     state.listener = listener;
     state.mcSession = attach.session;
