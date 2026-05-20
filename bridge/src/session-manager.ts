@@ -30,6 +30,13 @@ export interface SessionManagerStats {
   sessions: ManagedSessionSummary[];
 }
 
+export interface SessionAttachResult {
+  session: McSession;
+  created: boolean;
+  resumedFromGrace: boolean;
+  refCount: number;
+}
+
 // Tracks one McSession per logged-in user. Multiple WS clients (e.g. an
 // iPhone and an iPad) can attach to the same user and share a single bot.
 export class SessionManager {
@@ -45,9 +52,10 @@ export class SessionManager {
     profilesFolder: string,
     mcVersion: string,
     onMessage: (msg: ServerMessage) => void,
-  ): McSession {
+  ): SessionAttachResult {
     const sessionId = `${userId}@${mcVersion}`;
     let entry = this.sessions.get(sessionId);
+    let created = false;
     if (!entry) {
       if (this.sessions.size >= this.cfg.maxSessions) {
         throw new Error(
@@ -70,6 +78,7 @@ export class SessionManager {
         lastAttachedAt: now,
       };
       this.sessions.set(sessionId, entry);
+      created = true;
       session.start();
       session.on("ended", () => {
         // Bot disconnected. Drop the entry so a future attach() rebuilds it.
@@ -77,6 +86,7 @@ export class SessionManager {
         if (cur === entry) this.sessions.delete(sessionId);
       });
     }
+    const resumedFromGrace = Boolean(entry.graceTimer);
     if (entry.graceTimer) {
       clearTimeout(entry.graceTimer);
       entry.graceTimer = null;
@@ -95,7 +105,12 @@ export class SessionManager {
     const bossBars = entry.session.bossBarsSnapshot();
     if (bossBars) onMessage(bossBars);
     entry.session.on("message", onMessage);
-    return entry.session;
+    return {
+      session: entry.session,
+      created,
+      resumedFromGrace,
+      refCount: entry.refCount,
+    };
   }
 
   detach(sessionId: string, listener: (msg: ServerMessage) => void): void {

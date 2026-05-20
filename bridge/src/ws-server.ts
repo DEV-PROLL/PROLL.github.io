@@ -46,6 +46,21 @@ interface BridgeEvent {
   detail: string;
 }
 
+interface RecentIssue {
+  ts: number;
+  userId: string | null;
+  sessionId: string | null;
+  reason: string;
+}
+
+interface MemorySample {
+  ts: number;
+  rssMb: number;
+  heapUsedMb: number;
+  activeWs: number;
+  activeSessions: number;
+}
+
 interface RuntimeStats {
   startedAt: number;
   activeWs: number;
@@ -55,6 +70,16 @@ interface RuntimeStats {
   messagesIn: number;
   messagesRejected: number;
   errorsOut: number;
+  cachedAuths: number;
+  deviceLoginStarts: number;
+  deviceLoginCompletions: number;
+  sessionCreates: number;
+  sessionReuses: number;
+  graceReconnects: number;
+  kicked: number;
+  recentKicks: RecentIssue[];
+  recentErrors: RecentIssue[];
+  memorySamples: MemorySample[];
   recentEvents: BridgeEvent[];
 }
 
@@ -86,6 +111,16 @@ export function startWsServer(
     messagesIn: 0,
     messagesRejected: 0,
     errorsOut: 0,
+    cachedAuths: 0,
+    deviceLoginStarts: 0,
+    deviceLoginCompletions: 0,
+    sessionCreates: 0,
+    sessionReuses: 0,
+    graceReconnects: 0,
+    kicked: 0,
+    recentKicks: [],
+    recentErrors: [],
+    memorySamples: [],
     recentEvents: [],
   };
   const pendingLogins = new Map<string, PendingLogin>();
@@ -132,6 +167,7 @@ export function startWsServer(
       if (ws.readyState === ws.OPEN) {
         if (msg.type === "error" || msg.type === "auth_failed" || msg.type === "kicked") {
           stats.errorsOut += 1;
+          recordRecentIssue(stats, state, msg);
         }
         ws.send(JSON.stringify(msg));
       }
@@ -155,7 +191,7 @@ export function startWsServer(
         return;
       }
       recordEvent(stats, "ws_message", parsed.type);
-      handleMessage(parsed, state, send, cfg, auth, sessions, pendingLogins).catch((err) => {
+      handleMessage(parsed, state, send, cfg, auth, sessions, pendingLogins, stats).catch((err) => {
         send({ type: "error", text: err?.message ?? String(err) });
       });
     });
@@ -343,6 +379,55 @@ function recordEvent(stats: RuntimeStats, kind: string, detail: string): void {
   }
 }
 
+function recordRecentIssue(
+  stats: RuntimeStats,
+  state: ClientState,
+  msg: Extract<ServerMessage, { type: "error" | "auth_failed" | "kicked" }>,
+): void {
+  const issue: RecentIssue = {
+    ts: Date.now(),
+    userId: state.userId,
+    sessionId: state.sessionId,
+    reason: msg.type === "error" ? msg.text : msg.reason,
+  };
+  if (msg.type === "kicked") {
+    stats.kicked += 1;
+    stats.recentKicks.push(issue);
+    trimArray(stats.recentKicks, 20);
+    recordEvent(stats, "kicked", issue.reason);
+    return;
+  }
+  stats.recentErrors.push(issue);
+  trimArray(stats.recentErrors, 20);
+}
+
+function trimArray<T>(items: T[], max: number): void {
+  if (items.length > max) {
+    items.splice(0, items.length - max);
+  }
+}
+
+function recordMemorySample(
+  stats: RuntimeStats,
+  mem: NodeJS.MemoryUsage,
+  activeSessions: number,
+): MemorySample[] {
+  const rssMb = Math.round(mem.rss / 1024 / 1024);
+  const heapUsedMb = Math.round(mem.heapUsed / 1024 / 1024);
+  const last = stats.memorySamples.at(-1);
+  if (!last || Date.now() - last.ts >= 60_000 || last.rssMb !== rssMb) {
+    stats.memorySamples.push({
+      ts: Date.now(),
+      rssMb,
+      heapUsedMb,
+      activeWs: stats.activeWs,
+      activeSessions,
+    });
+    trimArray(stats.memorySamples, 120);
+  }
+  return stats.memorySamples.slice(-60);
+}
+
 function maskedClientIp(source: unknown): string {
   const req = source as {
     headers?: http.IncomingHttpHeaders;
@@ -377,6 +462,8 @@ function buildAdminStatus(
 ) {
   purgePendingLogins(pendingLogins);
   const mem = process.memoryUsage();
+  const sessionStats = sessions.stats();
+  const memorySamples = recordMemorySample(stats, mem, sessionStats.active);
   return {
     ok: true,
     now: Date.now(),
@@ -412,7 +499,21 @@ function buildAdminStatus(
     auth: {
       pendingLogins: pendingLogins.size,
     },
-    sessions: sessions.stats(),
+    counters: {
+      cachedAuths: stats.cachedAuths,
+      deviceLoginStarts: stats.deviceLoginStarts,
+      deviceLoginCompletions: stats.deviceLoginCompletions,
+      sessionCreates: stats.sessionCreates,
+      sessionReuses: stats.sessionReuses,
+      graceReconnects: stats.graceReconnects,
+      kicked: stats.kicked,
+    },
+    sessions: sessionStats,
+    memory: {
+      samples: memorySamples,
+    },
+    recentKicks: stats.recentKicks.slice(-20),
+    recentErrors: stats.recentErrors.slice(-20),
     recentEvents: stats.recentEvents.slice(-50),
   };
 }
@@ -432,14 +533,25 @@ function renderAdminDashboard(): string {
     .muted { color: #8b949e; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 18px 0; }
     .card { border: 1px solid rgba(240,246,252,.12); background: rgba(13,17,23,.82); border-radius: 14px; padding: 14px; box-shadow: 0 14px 40px rgba(0,0,0,.24); }
+    .card h2 { margin: 0 0 12px; font-size: 18px; }
     .label { color: #8b949e; font-size: 12px; font-weight: 700; text-transform: uppercase; }
     .value { font-size: 24px; font-weight: 800; margin-top: 6px; }
+    .subvalue { color: #8b949e; font-size: 12px; margin-top: 5px; }
     table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 12px; }
     th, td { padding: 10px 9px; border-bottom: 1px solid rgba(240,246,252,.08); text-align: left; font-size: 13px; }
     th { color: #8b949e; font-size: 12px; }
     .ok { color: #3fb950; font-weight: 800; }
     .warn { color: #f2cc60; font-weight: 800; }
+    .section-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 12px; margin-top: 12px; }
+    .list { display: grid; gap: 8px; }
+    .issue { display: grid; gap: 3px; padding: 10px; border: 1px solid rgba(240,246,252,.08); border-radius: 10px; background: rgba(255,255,255,.025); }
+    .issue strong { color: #f2cc60; }
+    .spark { display: flex; align-items: end; gap: 3px; height: 58px; padding-top: 8px; }
+    .bar { flex: 1; min-width: 4px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #3fb950, #1f6f3f); opacity: .9; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .chip { border: 1px solid rgba(240,246,252,.12); background: rgba(255,255,255,.04); color: #c9d1d9; border-radius: 999px; padding: 5px 8px; font-size: 12px; }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; color: #c9d1d9; font-size: 12px; line-height: 1.55; }
+    @media (max-width: 760px) { body { padding: 14px; } .section-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -447,13 +559,25 @@ function renderAdminDashboard(): string {
     <h1>루둘기 브릿지</h1>
     <div class="muted" id="subtitle">상태를 불러오는 중...</div>
     <section class="grid" id="cards"></section>
-    <section class="card">
-      <h2>세션</h2>
-      <div id="sessions"></div>
+    <section class="section-grid">
+      <div class="card">
+        <h2>세션</h2>
+        <div id="sessions"></div>
+      </div>
+      <div class="card">
+        <h2>메모리 추이</h2>
+        <div id="memory"></div>
+      </div>
     </section>
-    <section class="card" style="margin-top:12px">
-      <h2>최근 이벤트</h2>
-      <pre id="events"></pre>
+    <section class="section-grid">
+      <div class="card">
+        <h2>최근 킥 / 오류</h2>
+        <div id="issues"></div>
+      </div>
+      <div class="card">
+        <h2>최근 이벤트</h2>
+        <pre id="events"></pre>
+      </div>
     </section>
   </main>
   <script>
@@ -464,24 +588,36 @@ function renderAdminDashboard(): string {
       if (className) node.className = className;
       return node;
     };
-    function card(label, value) {
+    function card(label, value, subtext) {
       const wrap = el("div", null, "card");
       wrap.append(el("div", label, "label"), el("div", value, "value"));
+      if (subtext) wrap.append(el("div", subtext, "subvalue"));
       return wrap;
+    }
+    const fmtDuration = (sec) => {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return h > 0 ? h + "시간 " + m + "분" : m + "분";
+    };
+    function empty(text) {
+      return el("div", text, "muted");
     }
     function render(data) {
       document.getElementById("subtitle").textContent =
         data.target.host + ":" + data.target.port + " · MC " + data.target.version +
         " · " + fmtTime(data.now);
       const cards = document.getElementById("cards");
+      const reconnects = data.counters.sessionReuses + data.counters.graceReconnects;
+      const activeNames = data.sessions.sessions.map((session) => session.ign || session.userId).join(", ");
       cards.replaceChildren(
-        card("Active WS", data.websocket.active),
-        card("Sessions", data.sessions.active + "/" + data.sessions.max),
-        card("Pending Login", data.auth.pendingLogins),
-        card("Memory RSS", data.process.rssMb + " MB"),
-        card("Rejected", data.websocket.rejectedToken + data.websocket.rejectedOrigin + data.websocket.messagesRejected),
-        card("Messages", data.websocket.messagesIn),
-        card("Uptime", Math.floor(data.uptimeSec / 60) + "분")
+        card("Active WS", data.websocket.active, "총 " + data.websocket.total + "회 연결"),
+        card("Sessions", data.sessions.active + "/" + data.sessions.max, activeNames || "활성 계정 없음"),
+        card("Reconnects", reconnects, "재사용 " + data.counters.sessionReuses + " · 유예복구 " + data.counters.graceReconnects),
+        card("Kicks", data.counters.kicked, "최근 " + data.recentKicks.length + "건 보관"),
+        card("Memory RSS", data.process.rssMb + " MB", "heap " + data.process.heapUsedMb + "/" + data.process.heapTotalMb + " MB"),
+        card("Rejected", data.websocket.rejectedToken + data.websocket.rejectedOrigin + data.websocket.messagesRejected, "token/origin/message"),
+        card("Auth", data.counters.cachedAuths, "device " + data.counters.deviceLoginCompletions + "/" + data.counters.deviceLoginStarts),
+        card("Uptime", fmtDuration(data.uptimeSec), "pid " + data.process.pid)
       );
       const sessions = document.getElementById("sessions");
       if (!data.sessions.sessions.length) {
@@ -489,7 +625,7 @@ function renderAdminDashboard(): string {
       } else {
         const table = el("table");
         const head = el("tr");
-        ["IGN", "Version", "Ref", "Players", "State", "Last attach"].forEach((name) => head.append(el("th", name)));
+        ["IGN", "Version", "Ref", "Players", "State", "Age", "Last attach"].forEach((name) => head.append(el("th", name)));
         table.append(head);
         data.sessions.sessions.forEach((session) => {
           const row = el("tr");
@@ -499,16 +635,65 @@ function renderAdminDashboard(): string {
             el("td", session.refCount),
             el("td", session.playersOnline ?? "-"),
             el("td", session.connected ? "online" : session.closing ? "closing" : "offline", session.connected ? "ok" : "warn"),
+            el("td", fmtDuration(Math.max(0, Math.floor((data.now - session.createdAt) / 1000)))),
             el("td", fmtTime(session.lastAttachedAt))
           );
           table.append(row);
         });
         sessions.replaceChildren(table);
       }
+      renderMemory(data);
+      renderIssues(data);
       document.getElementById("events").textContent = data.recentEvents
         .slice().reverse()
         .map((event) => "[" + fmtTime(event.ts) + "] " + event.kind + " · " + event.detail)
         .join("\\n") || "이벤트 없음";
+    }
+    function renderMemory(data) {
+      const wrap = document.getElementById("memory");
+      const samples = data.memory.samples || [];
+      if (!samples.length) {
+        wrap.replaceChildren(empty("샘플 없음"));
+        return;
+      }
+      const values = samples.map((sample) => sample.rssMb);
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const latest = samples[samples.length - 1];
+      const spark = el("div", null, "spark");
+      const range = Math.max(1, max - min);
+      samples.slice(-40).forEach((sample) => {
+        const bar = el("div", null, "bar");
+        bar.style.height = Math.max(8, 12 + ((sample.rssMb - min) / range) * 42) + "px";
+        bar.title = fmtTime(sample.ts) + " · " + sample.rssMb + " MB";
+        spark.append(bar);
+      });
+      const chips = el("div", null, "chips");
+      chips.append(
+        el("span", "현재 " + latest.rssMb + " MB", "chip"),
+        el("span", "범위 " + min + "-" + max + " MB", "chip"),
+        el("span", "샘플 " + samples.length + "개", "chip")
+      );
+      wrap.replaceChildren(spark, chips);
+    }
+    function renderIssues(data) {
+      const wrap = document.getElementById("issues");
+      const issues = [
+        ...(data.recentKicks || []).map((issue) => ({ ...issue, kind: "kick" })),
+        ...(data.recentErrors || []).map((issue) => ({ ...issue, kind: "error" })),
+      ].sort((a, b) => b.ts - a.ts).slice(0, 8);
+      if (!issues.length) {
+        wrap.replaceChildren(empty("최근 킥/오류 없음"));
+        return;
+      }
+      const list = el("div", null, "list");
+      issues.forEach((issue) => {
+        const item = el("div", null, "issue");
+        const title = el("strong", (issue.kind === "kick" ? "KICK" : "ERROR") + " · " + (issue.userId || issue.sessionId || "unknown"));
+        item.append(title, el("span", issue.reason), el("span", fmtTime(issue.ts), "muted"));
+        list.append(item);
+      });
+      wrap.replaceChildren(list);
     }
     async function refresh() {
       try {
@@ -602,6 +787,7 @@ async function handleMessage(
   auth: AuthService,
   sessions: SessionManager,
   pendingLogins: Map<string, PendingLogin>,
+  stats: RuntimeStats,
 ): Promise<void> {
   switch (msg.type) {
     case "ping":
@@ -613,6 +799,7 @@ async function handleMessage(
         send({ type: "error", text: "already authenticated" });
         return;
       }
+      stats.deviceLoginStarts += 1;
       let mcVersion: string;
       try {
         mcVersion = resolveMcVersion(msg.mcVersion, cfg);
@@ -633,8 +820,9 @@ async function handleMessage(
         const result = await pending.promise;
         pending.expiresAt = Date.now() + PENDING_LOGIN_RESULT_TTL_MS;
         if (!isClientOpen(state)) return;
+        stats.deviceLoginCompletions += 1;
         state.pendingLoginRequestId = null;
-        attachToSession(result, mcVersion, state, send, sessions, {
+        attachToSession(result, mcVersion, state, send, sessions, stats, {
           rebuildExisting: true,
         });
       } catch (err) {
@@ -661,7 +849,8 @@ async function handleMessage(
         send({ type: "auth_failed", reason: "no cached login for this user" });
         return;
       }
-      attachToSession(cached, mcVersion, state, send, sessions);
+      stats.cachedAuths += 1;
+      attachToSession(cached, mcVersion, state, send, sessions, stats);
       return;
     }
 
@@ -847,6 +1036,7 @@ function attachToSession(
   state: ClientState,
   send: (m: ServerMessage) => void,
   sessions: SessionManager,
+  stats: RuntimeStats,
   options: { rebuildExisting?: boolean } = {},
 ): void {
   detachClientSession(state, sessions);
@@ -864,13 +1054,25 @@ function attachToSession(
     const { userId, cacheUserId, ign, uuid, profilesFolder } = authResult;
     if (options.rebuildExisting) {
       sessions.forceCloseUser(userId);
+      recordEvent(stats, "session_rebuild", `${userId}@${mcVersion}`);
     }
     const sessionId = `${userId}@${mcVersion}`;
-    const mc = sessions.attach(userId, cacheUserId, profilesFolder, mcVersion, listener);
+    const attach = sessions.attach(userId, cacheUserId, profilesFolder, mcVersion, listener);
+    if (attach.created) {
+      stats.sessionCreates += 1;
+      recordEvent(stats, "session_create", sessionId);
+    } else {
+      stats.sessionReuses += 1;
+      recordEvent(stats, "session_reuse", `${sessionId} refs=${attach.refCount}`);
+    }
+    if (attach.resumedFromGrace) {
+      stats.graceReconnects += 1;
+      recordEvent(stats, "session_resume", sessionId);
+    }
     state.userId = userId;
     state.sessionId = sessionId;
     state.listener = listener;
-    state.mcSession = mc;
+    state.mcSession = attach.session;
     send({ type: "auth_ok", userId, ign, uuid });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);

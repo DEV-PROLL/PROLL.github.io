@@ -66,6 +66,9 @@ npx wscat -c 'ws://localhost:8080?token=change-this-long-random-token'
 직접 접근하면 `404`를 반환한다. 대시보드는 운영자 점검용이며 일반 유저에게
 노출하지 않는다.
 
+대시보드는 활성 WebSocket, 활성 세션/계정, 재접속/세션 재사용, 최근 킥/오류,
+메모리 RSS 추이를 5초 간격으로 갱신한다.
+
 ## 보안 메모
 
 - 토큰은 절대 git/로그에 노출되지 않음. `.gitignore`에 `bridge/tokens/` 포함.
