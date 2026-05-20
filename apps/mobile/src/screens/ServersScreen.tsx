@@ -12,6 +12,7 @@ import {
 import {
   DEFAULT_BRIDGE_URL,
   DEFAULT_SERVER_ADDRESS,
+  DEFAULT_SERVER_ID,
   DEFAULT_SERVER_LABEL,
 } from "../appConfig";
 import {
@@ -24,9 +25,11 @@ import {
   getMcVersion,
   getSavedAccounts,
   getServerAddress,
+  getServerId,
   setBridgeUrl,
   setMcVersion,
   setServerAddress,
+  setServerId,
   type SavedAccount,
 } from "../store/settings";
 import { GlassPanel, MinecraftHead, PrimaryButton, StatusPill } from "../components/RudulgiUI";
@@ -35,6 +38,7 @@ import { theme } from "../theme";
 interface Props {
   onContinue: (
     bridgeUrl: string,
+    serverId: string,
     mcVersion: string,
     serverAddress: string,
   ) => void;
@@ -56,6 +60,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 export function ServersScreen({ onContinue }: Props) {
   const [serverAddress, setLocalServerAddress] = useState(DEFAULT_SERVER_ADDRESS);
+  const [serverId, setLocalServerId] = useState(DEFAULT_SERVER_ID);
   const [bridgeUrl, setLocalBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
   const [mcVersion, setLocalMcVersion] = useState(DEFAULT_MC_VERSION);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
@@ -78,10 +83,12 @@ export function ServersScreen({ onContinue }: Props) {
   useEffect(() => {
     void Promise.all([
       getBridgeUrl(),
+      getServerId(),
       getMcVersion(),
       getServerAddress(),
       getSavedAccounts(),
-    ]).then(([storedBridgeUrl, version, address, savedAccounts]) => {
+    ]).then(([storedBridgeUrl, storedServerId, version, address, savedAccounts]) => {
+      if (storedServerId) setLocalServerId(storedServerId);
       if (address) setLocalServerAddress(address);
       const effectiveBridgeUrl = resolveInitialBridgeUrl(storedBridgeUrl);
       if (effectiveBridgeUrl) {
@@ -124,7 +131,7 @@ export function ServersScreen({ onContinue }: Props) {
     let timer: ReturnType<typeof setInterval> | null = null;
 
     const poll = async () => {
-      const next = await fetchServerStatus(bridgeUrl);
+      const next = await fetchServerStatus(bridgeUrl, serverId);
       if (!cancelled) setServerStatus(next);
     };
 
@@ -137,7 +144,7 @@ export function ServersScreen({ onContinue }: Props) {
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [bridgeUrl]);
+  }, [bridgeUrl, serverId]);
 
   const handleConnect = async () => {
     setFormError(null);
@@ -156,6 +163,13 @@ export function ServersScreen({ onContinue }: Props) {
       return;
     }
 
+    const normalizedServerId = serverId.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(normalizedServerId)) {
+      setFormError("서버 ID 설정이 올바르지 않습니다.");
+      setSubmitting(false);
+      return;
+    }
+
     const normalized = normalizeMcVersion(mcVersion);
     if (!normalized || !isSupportedMcVersion(mcVersion)) {
       setFormError("현재 루둘기는 Minecraft 1.21.11 접속 기준입니다.");
@@ -164,9 +178,10 @@ export function ServersScreen({ onContinue }: Props) {
     }
 
     await setServerAddress(address);
+    await setServerId(normalizedServerId);
     await setBridgeUrl(trimmedBridgeUrl);
     await setMcVersion(normalized);
-    onContinue(trimmedBridgeUrl, normalized, address);
+    onContinue(trimmedBridgeUrl, normalizedServerId, normalized, address);
     setSubmitting(false);
   };
 
@@ -264,6 +279,16 @@ export function ServersScreen({ onContinue }: Props) {
               keyboardType="url"
               style={styles.input}
             />
+            <Text style={styles.label}>Server ID</Text>
+            <TextInput
+              value={serverId}
+              onChangeText={setLocalServerId}
+              placeholder={DEFAULT_SERVER_ID}
+              placeholderTextColor={theme.textDim}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
             <Text style={styles.label}>Bridge</Text>
             <TextInput
               value={bridgeUrl}
@@ -345,9 +370,12 @@ function resolveInitialBridgeUrl(storedBridgeUrl: string | null): string {
   return storedBridgeUrl || DEFAULT_BRIDGE_URL;
 }
 
-async function fetchServerStatus(bridgeUrl: string): Promise<ServerStatus> {
+async function fetchServerStatus(
+  bridgeUrl: string,
+  serverId: string,
+): Promise<ServerStatus> {
   try {
-    const url = toStatusUrl(bridgeUrl);
+    const url = toStatusUrl(bridgeUrl, serverId);
     const response = await fetch(url, {
       cache: "no-store",
     });
@@ -379,10 +407,13 @@ async function fetchServerStatus(bridgeUrl: string): Promise<ServerStatus> {
   }
 }
 
-function toStatusUrl(bridgeUrl: string): string {
+function toStatusUrl(bridgeUrl: string, serverId: string): string {
   const url = new URL(bridgeUrl);
   url.protocol = url.protocol === "wss:" ? "https:" : "http:";
   url.pathname = "/status";
+  if (serverId) {
+    url.searchParams.set("serverId", serverId);
+  }
   return url.toString();
 }
 

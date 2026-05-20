@@ -28,6 +28,7 @@ import {
 
 interface Props {
   bridgeUrl: string;
+  serverId: string;
   mcVersion: string;
   serverAddress: string;
   onAuthenticated: (info: { ign: string; userId: string; uuid?: string }) => void;
@@ -45,6 +46,7 @@ interface DeviceCode {
 // and wait for `auth_ok` before handing control to the chat screen.
 export function LoginScreen({
   bridgeUrl,
+  serverId,
   mcVersion,
   serverAddress,
   onAuthenticated,
@@ -110,11 +112,11 @@ export function LoginScreen({
 
   const sendAuthStart = useCallback(
     (requestId: string): boolean => {
-      const sent = send({ type: "auth_start", mcVersion, loginRequestId: requestId });
+      const sent = send({ type: "auth_start", serverId, mcVersion, loginRequestId: requestId });
       if (sent) openAuthRequestRef.current = requestId;
       return sent;
     },
-    [mcVersion, send],
+    [mcVersion, send, serverId],
   );
 
   useEffect(() => {
@@ -147,7 +149,7 @@ export function LoginScreen({
     setError(null);
     setPendingLoginRequestIdState(null);
     void clearPendingLoginRequestId();
-    send({ type: "auth_cached", userId: account.userId, mcVersion });
+    send({ type: "auth_cached", userId: account.userId, serverId, mcVersion });
   };
 
   const forgetAccount = async (account: SavedAccount) => {

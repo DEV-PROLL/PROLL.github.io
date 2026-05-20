@@ -32,6 +32,8 @@ export interface McSessionOptions {
   host: string;
   port: number;
   version: string;
+  serverId?: string;
+  serverName?: string;
   username: string;          // Microsoft email / cache key
   profilesFolder: string;    // prismarine-auth cache directory for this user
 }
@@ -496,6 +498,8 @@ export class McSession extends EventEmitter {
       type: "status",
       connected: true,
       server: `${this.opts.host}:${this.opts.port}`,
+      serverId: this.opts.serverId,
+      serverName: this.opts.serverName,
       ign: this.bot.username,
       playersOnline: Object.keys(this.bot.players ?? {}).length,
     };
@@ -554,6 +558,8 @@ export class McSession extends EventEmitter {
       type: "status",
       connected: false,
       server: `${this.opts.host}:${this.opts.port}`,
+      serverId: this.opts.serverId,
+      serverName: this.opts.serverName,
       reason: normalizedReason,
     });
     this.emit("ended", normalizedReason);
@@ -595,6 +601,8 @@ export class McSession extends EventEmitter {
       type: "status",
       connected: true,
       server: `${this.opts.host}:${this.opts.port}`,
+      serverId: this.opts.serverId,
+      serverName: this.opts.serverName,
       ign: this.bot.username,
       playersOnline: Object.keys(this.bot.players ?? {}).length,
     });

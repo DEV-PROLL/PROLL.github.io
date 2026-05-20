@@ -42,6 +42,8 @@ EXPO_PUBLIC_BRIDGE_URL="wss://bridge.proit.kr?token=<BRIDGE_TOKEN>" npm run web:
 ```
 
 그러면 일반 사용자는 첫 화면에서 `99999.kr`만 확인하고 로그인 흐름으로 넘어간다.
+내부 프로토콜은 `serverId`를 같이 보내므로, 운영자가 브릿지 `SERVER_PROFILES`와
+앱 UI를 확장하면 나중에 다른 서버도 같은 구조로 붙일 수 있다.
 
 ## 빌드
 

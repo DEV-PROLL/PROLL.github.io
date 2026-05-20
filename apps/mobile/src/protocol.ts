@@ -1,8 +1,8 @@
 // Wire protocol shared with the bridge. Keep in sync with bridge/src/types.ts.
 
 export type ClientMessage =
-  | { type: "auth_start"; mcVersion?: string; loginRequestId?: string }
-  | { type: "auth_cached"; userId: string; mcVersion?: string }
+  | { type: "auth_start"; mcVersion?: string; serverId?: string; loginRequestId?: string }
+  | { type: "auth_cached"; userId: string; mcVersion?: string; serverId?: string }
   | { type: "send"; text: string }
   | { type: "complete"; requestId: string; text: string }
   | { type: "window_click"; slot: number; mouseButton?: 0 | 1 }
@@ -24,6 +24,8 @@ export type ServerMessage =
       type: "status";
       connected: boolean;
       server: string;
+      serverId?: string;
+      serverName?: string;
       ign?: string;
       playersOnline?: number;
       reason?: string;

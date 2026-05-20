@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
 const KEY_BRIDGE_URL = "bridge_url";
+const KEY_SERVER_ID = "server_id";
 const KEY_SERVER_ADDRESS = "server_address";
 const KEY_USER_ID = "user_id";
 const KEY_ACCOUNTS = "accounts";
@@ -25,6 +26,14 @@ export async function setBridgeUrl(url: string): Promise<void> {
 
 export async function clearBridgeUrl(): Promise<void> {
   await deleteStoredItem(KEY_BRIDGE_URL);
+}
+
+export async function getServerId(): Promise<string | null> {
+  return getStoredItem(KEY_SERVER_ID);
+}
+
+export async function setServerId(serverId: string): Promise<void> {
+  await setStoredItem(KEY_SERVER_ID, serverId);
 }
 
 export async function getServerAddress(): Promise<string | null> {

@@ -2,8 +2,8 @@
 // All messages are JSON over a single WebSocket connection.
 
 export type ClientMessage =
-  | { type: "auth_start"; mcVersion?: string; loginRequestId?: string }
-  | { type: "auth_cached"; userId: string; mcVersion?: string }
+  | { type: "auth_start"; mcVersion?: string; serverId?: string; loginRequestId?: string }
+  | { type: "auth_cached"; userId: string; mcVersion?: string; serverId?: string }
   | { type: "send"; text: string }
   | { type: "complete"; requestId: string; text: string }
   | { type: "window_click"; slot: number; mouseButton?: 0 | 1 }
@@ -25,6 +25,8 @@ export type ServerMessage =
       type: "status";
       connected: boolean;
       server: string;
+      serverId?: string;
+      serverName?: string;
       ign?: string;
       playersOnline?: number;
       reason?: string;
@@ -153,10 +155,20 @@ export interface GuiItem {
   loreSegments?: ChatSegment[][];
 }
 
+export interface BridgeServerProfile {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  version: string;
+  publicAddress: string;
+}
+
 export interface BridgeConfig {
   mcHost: string;
   mcPort: number;
   mcVersion: string;
+  serverProfiles: BridgeServerProfile[];
   bindHost: string;
   wsPort: number;
   bridgeToken: string | null;

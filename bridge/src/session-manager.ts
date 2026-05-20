@@ -1,8 +1,10 @@
 import { McSession } from "./mc-session";
-import type { BridgeConfig, ServerMessage } from "./types";
+import type { BridgeConfig, BridgeServerProfile, ServerMessage } from "./types";
 
 interface ManagedSession {
   session: McSession;
+  userId: string;
+  target: BridgeServerProfile;
   refCount: number;          // how many WS clients are attached
   graceTimer: NodeJS.Timeout | null; // pending shutdown when refCount drops to 0
   createdAt: number;
@@ -14,6 +16,9 @@ const GRACE_MS = 5 * 1000;
 export interface ManagedSessionSummary {
   sessionId: string;
   userId: string;
+  serverId: string;
+  serverName: string;
+  serverAddress: string;
   mcVersion: string;
   refCount: number;
   connected: boolean;
@@ -31,6 +36,7 @@ export interface SessionManagerStats {
 }
 
 export interface SessionAttachResult {
+  sessionId: string;
   session: McSession;
   created: boolean;
   resumedFromGrace: boolean;
@@ -50,10 +56,10 @@ export class SessionManager {
     userId: string,
     cacheUserId: string,
     profilesFolder: string,
-    mcVersion: string,
+    target: BridgeServerProfile,
     onMessage: (msg: ServerMessage) => void,
   ): SessionAttachResult {
-    const sessionId = `${userId}@${mcVersion}`;
+    const sessionId = buildSessionId(userId, target);
     let entry = this.sessions.get(sessionId);
     let created = false;
     if (!entry) {
@@ -63,15 +69,19 @@ export class SessionManager {
         );
       }
       const session = new McSession({
-        host: this.cfg.mcHost,
-        port: this.cfg.mcPort,
-        version: mcVersion,
+        host: target.host,
+        port: target.port,
+        version: target.version,
+        serverId: target.id,
+        serverName: target.name,
         username: cacheUserId,
         profilesFolder,
       });
       const now = Date.now();
       entry = {
         session,
+        userId,
+        target,
         refCount: 0,
         graceTimer: null,
         createdAt: now,
@@ -106,6 +116,7 @@ export class SessionManager {
     if (bossBars) onMessage(bossBars);
     entry.session.on("message", onMessage);
     return {
+      sessionId,
       session: entry.session,
       created,
       resumedFromGrace,
@@ -143,7 +154,7 @@ export class SessionManager {
 
   forceCloseUser(userId: string): void {
     for (const [sessionId, entry] of this.sessions) {
-      if (!sessionId.startsWith(`${userId}@`)) continue;
+      if (entry.userId !== userId) continue;
       if (entry.graceTimer) {
         clearTimeout(entry.graceTimer);
         entry.graceTimer = null;
@@ -166,14 +177,14 @@ export class SessionManager {
       active: this.sessions.size,
       max: this.cfg.maxSessions,
       sessions: [...this.sessions.entries()].map(([sessionId, entry]) => {
-        const splitAt = sessionId.lastIndexOf("@");
-        const userId = splitAt >= 0 ? sessionId.slice(0, splitAt) : sessionId;
-        const mcVersion = splitAt >= 0 ? sessionId.slice(splitAt + 1) : "";
         const session = entry.session.summary();
         return {
           sessionId,
-          userId,
-          mcVersion,
+          userId: entry.userId,
+          serverId: entry.target.id,
+          serverName: entry.target.name,
+          serverAddress: entry.target.publicAddress,
+          mcVersion: entry.target.version,
           refCount: entry.refCount,
           connected: session.connected,
           ign: session.ign,
@@ -185,4 +196,8 @@ export class SessionManager {
       }),
     };
   }
+}
+
+function buildSessionId(userId: string, target: BridgeServerProfile): string {
+  return `${encodeURIComponent(userId)}@${target.id}@${target.version}`;
 }

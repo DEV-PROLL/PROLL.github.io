@@ -32,6 +32,7 @@ import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
 
 interface Props {
   bridgeUrl: string;
+  serverId: string;
   mcVersion: string;
   serverAddress: string;
   ign: string;
@@ -88,6 +89,7 @@ const WEB_GLASS_BLUR =
 
 export function ChatScreen({
   bridgeUrl,
+  serverId,
   mcVersion,
   serverAddress,
   ign,
@@ -410,7 +412,7 @@ export function ChatScreen({
         phase: "joining",
         reason: manual ? undefined : prev.reason,
       }));
-      const ok = send({ type: "auth_cached", userId, mcVersion });
+      const ok = send({ type: "auth_cached", userId, serverId, mcVersion });
       if (!ok) {
         setServerInfo((prev) => ({
           ...prev,
@@ -421,7 +423,7 @@ export function ChatScreen({
       }
       return ok;
     },
-    [clearAutoReconnectTimer, clearTransientOverlays, mcVersion, send, state, userId],
+    [clearAutoReconnectTimer, clearTransientOverlays, mcVersion, send, serverId, state, userId],
   );
 
   useEffect(() => {

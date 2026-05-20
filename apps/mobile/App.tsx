@@ -8,9 +8,10 @@ import {
   clearBridgeUrl,
   getMcVersion,
   getServerAddress,
+  getServerId,
 } from "./src/store/settings";
 import { DEFAULT_MC_VERSION } from "./src/mcVersions";
-import { DEFAULT_SERVER_ADDRESS } from "./src/appConfig";
+import { DEFAULT_SERVER_ADDRESS, DEFAULT_SERVER_ID } from "./src/appConfig";
 
 type Phase =
   | { name: "loading" }
@@ -18,12 +19,14 @@ type Phase =
   | {
       name: "login";
       bridgeUrl: string;
+      serverId: string;
       mcVersion: string;
       serverAddress: string;
     }
   | {
       name: "chat";
       bridgeUrl: string;
+      serverId: string;
       mcVersion: string;
       serverAddress: string;
       ign: string;
@@ -37,13 +40,14 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       const url = await getBridgeUrl();
+      const serverId = (await getServerId()) ?? DEFAULT_SERVER_ID;
       const mcVersion = (await getMcVersion()) ?? DEFAULT_MC_VERSION;
       const serverAddress = (await getServerAddress()) ?? DEFAULT_SERVER_ADDRESS;
       if (!url) {
         setPhase({ name: "server" });
         return;
       }
-      setPhase({ name: "login", bridgeUrl: url, mcVersion, serverAddress });
+      setPhase({ name: "login", bridgeUrl: url, serverId, mcVersion, serverAddress });
     })();
   }, []);
 
@@ -54,8 +58,8 @@ export default function App() {
 
       {phase.name === "server" && (
         <ServersScreen
-          onContinue={(bridgeUrl, mcVersion, serverAddress) =>
-            setPhase({ name: "login", bridgeUrl, mcVersion, serverAddress })
+          onContinue={(bridgeUrl, serverId, mcVersion, serverAddress) =>
+            setPhase({ name: "login", bridgeUrl, serverId, mcVersion, serverAddress })
           }
         />
       )}
@@ -63,12 +67,14 @@ export default function App() {
       {phase.name === "login" && (
         <LoginScreen
           bridgeUrl={phase.bridgeUrl}
+          serverId={phase.serverId}
           mcVersion={phase.mcVersion}
           serverAddress={phase.serverAddress}
           onAuthenticated={({ ign, userId, uuid }) =>
             setPhase({
               name: "chat",
               bridgeUrl: phase.bridgeUrl,
+              serverId: phase.serverId,
               mcVersion: phase.mcVersion,
               serverAddress: phase.serverAddress,
               ign,
@@ -86,6 +92,7 @@ export default function App() {
       {phase.name === "chat" && (
         <ChatScreen
           bridgeUrl={phase.bridgeUrl}
+          serverId={phase.serverId}
           mcVersion={phase.mcVersion}
           serverAddress={phase.serverAddress}
           ign={phase.ign}
@@ -95,6 +102,7 @@ export default function App() {
             setPhase({
               name: "login",
               bridgeUrl: phase.bridgeUrl,
+              serverId: phase.serverId,
               mcVersion: phase.mcVersion,
               serverAddress: phase.serverAddress,
             })

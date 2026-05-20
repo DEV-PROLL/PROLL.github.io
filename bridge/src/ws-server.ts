@@ -2,7 +2,7 @@ import http from "http";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { randomUUID } from "crypto";
 import { ping, type NewPingResult, type OldPingResult } from "minecraft-protocol";
-import type { BridgeConfig, ClientMessage, ServerMessage } from "./types";
+import type { BridgeConfig, BridgeServerProfile, ClientMessage, ServerMessage } from "./types";
 import { AuthService, type AuthResult, type DeviceCode } from "./auth";
 import type { McSession } from "./mc-session";
 import type { SessionManager } from "./session-manager";
@@ -30,6 +30,8 @@ interface StatusCache {
 
 interface ServerStatusBody {
   ok: boolean;
+  serverId: string;
+  name: string;
   host: string;
   port: number;
   updatedAt: number;
@@ -97,11 +99,7 @@ export function startWsServer(
   auth: AuthService,
   sessions: SessionManager,
 ): http.Server {
-  const statusCache: StatusCache = {
-    expiresAt: 0,
-    promise: null,
-    value: null,
-  };
+  const statusCaches = new Map<string, StatusCache>();
   const stats: RuntimeStats = {
     startedAt: Date.now(),
     activeWs: 0,
@@ -126,7 +124,7 @@ export function startWsServer(
   const pendingLogins = new Map<string, PendingLogin>();
 
   const httpServer = http.createServer((req, res) => {
-    void handleHttpRequest(req, res, cfg, statusCache, stats, sessions, pendingLogins);
+    void handleHttpRequest(req, res, cfg, statusCaches, stats, sessions, pendingLogins);
   });
 
   const wss = new WebSocketServer({
@@ -224,7 +222,7 @@ async function handleHttpRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   cfg: BridgeConfig,
-  statusCache: StatusCache,
+  statusCaches: Map<string, StatusCache>,
   stats: RuntimeStats,
   sessions: SessionManager,
   pendingLogins: Map<string, PendingLogin>,
@@ -257,7 +255,16 @@ async function handleHttpRequest(
       return;
     }
 
-    const status = await getServerStatus(cfg, statusCache);
+    let target: BridgeServerProfile;
+    try {
+      target = resolveServerProfile(url.searchParams.get("serverId") ?? undefined, cfg);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      res.writeHead(404, { ...headers, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: reason }));
+      return;
+    }
+    const status = await getServerStatus(target, statusCaches);
     res.writeHead(200, {
       ...headers,
       "Cache-Control": "no-store",
@@ -474,6 +481,12 @@ function buildAdminStatus(
       port: cfg.mcPort,
       version: cfg.mcVersion,
     },
+    serverProfiles: cfg.serverProfiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      publicAddress: profile.publicAddress,
+      version: profile.version,
+    })),
     security: {
       bindHost: cfg.bindHost,
       tokenRequired: Boolean(cfg.bridgeToken),
@@ -609,9 +622,13 @@ function renderAdminDashboard(): string {
       const cards = document.getElementById("cards");
       const reconnects = data.counters.sessionReuses + data.counters.graceReconnects;
       const activeNames = data.sessions.sessions.map((session) => session.ign || session.userId).join(", ");
+      const profileNames = (data.serverProfiles || [])
+        .map((profile) => profile.name + " " + profile.publicAddress)
+        .join(", ");
       cards.replaceChildren(
         card("Active WS", data.websocket.active, "총 " + data.websocket.total + "회 연결"),
         card("Sessions", data.sessions.active + "/" + data.sessions.max, activeNames || "활성 계정 없음"),
+        card("Profiles", (data.serverProfiles || []).length, profileNames || "기본 서버"),
         card("Reconnects", reconnects, "재사용 " + data.counters.sessionReuses + " · 유예복구 " + data.counters.graceReconnects),
         card("Kicks", data.counters.kicked, "최근 " + data.recentKicks.length + "건 보관"),
         card("Memory RSS", data.process.rssMb + " MB", "heap " + data.process.heapUsedMb + "/" + data.process.heapTotalMb + " MB"),
@@ -625,12 +642,13 @@ function renderAdminDashboard(): string {
       } else {
         const table = el("table");
         const head = el("tr");
-        ["IGN", "Version", "Ref", "Players", "State", "Age", "Last attach"].forEach((name) => head.append(el("th", name)));
+        ["IGN", "Server", "Version", "Ref", "Players", "State", "Age", "Last attach"].forEach((name) => head.append(el("th", name)));
         table.append(head);
         data.sessions.sessions.forEach((session) => {
           const row = el("tr");
           row.append(
             el("td", session.ign || session.userId),
+            el("td", session.serverName || session.serverId || "-"),
             el("td", session.mcVersion || "-"),
             el("td", session.refCount),
             el("td", session.playersOnline ?? "-"),
@@ -711,14 +729,23 @@ function renderAdminDashboard(): string {
 }
 
 async function getServerStatus(
-  cfg: BridgeConfig,
-  cache: StatusCache,
+  target: BridgeServerProfile,
+  caches: Map<string, StatusCache>,
 ): Promise<ServerStatusBody> {
+  let cache = caches.get(target.id);
+  if (!cache) {
+    cache = {
+      expiresAt: 0,
+      promise: null,
+      value: null,
+    };
+    caches.set(target.id, cache);
+  }
   const now = Date.now();
   if (cache.value && cache.expiresAt > now) return cache.value;
   if (cache.promise) return cache.promise;
 
-  cache.promise = pingMinecraftServer(cfg)
+  cache.promise = pingMinecraftServer(target)
     .then((status) => {
       cache.value = status;
       cache.expiresAt = Date.now() + (status.ok ? 5_000 : 2_000);
@@ -731,20 +758,22 @@ async function getServerStatus(
   return cache.promise;
 }
 
-async function pingMinecraftServer(cfg: BridgeConfig): Promise<ServerStatusBody> {
+async function pingMinecraftServer(target: BridgeServerProfile): Promise<ServerStatusBody> {
   try {
     const result = await ping({
-      host: cfg.mcHost,
-      port: cfg.mcPort,
-      version: cfg.mcVersion,
+      host: target.host,
+      port: target.port,
+      version: target.version,
       closeTimeout: 4_000,
       noPongTimeout: 4_000,
     });
     const normalized = normalizePingResult(result);
     return {
       ok: true,
-      host: cfg.mcHost,
-      port: cfg.mcPort,
+      serverId: target.id,
+      name: target.name,
+      host: target.host,
+      port: target.port,
       updatedAt: Date.now(),
       ...normalized,
     };
@@ -752,8 +781,10 @@ async function pingMinecraftServer(cfg: BridgeConfig): Promise<ServerStatusBody>
     const reason = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
-      host: cfg.mcHost,
-      port: cfg.mcPort,
+      serverId: target.id,
+      name: target.name,
+      host: target.host,
+      port: target.port,
       updatedAt: Date.now(),
       error: reason,
     };
@@ -800,9 +831,9 @@ async function handleMessage(
         return;
       }
       stats.deviceLoginStarts += 1;
-      let mcVersion: string;
+      let target: BridgeServerProfile;
       try {
-        mcVersion = resolveMcVersion(msg.mcVersion, cfg);
+        target = resolveTarget(msg.serverId, msg.mcVersion, cfg);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         send({ type: "auth_failed", reason });
@@ -822,7 +853,7 @@ async function handleMessage(
         if (!isClientOpen(state)) return;
         stats.deviceLoginCompletions += 1;
         state.pendingLoginRequestId = null;
-        attachToSession(result, mcVersion, state, send, sessions, stats, {
+        attachToSession(result, target, state, send, sessions, stats, {
           rebuildExisting: true,
         });
       } catch (err) {
@@ -836,9 +867,9 @@ async function handleMessage(
     }
 
     case "auth_cached": {
-      let mcVersion: string;
+      let target: BridgeServerProfile;
       try {
-        mcVersion = resolveMcVersion(msg.mcVersion, cfg);
+        target = resolveTarget(msg.serverId, msg.mcVersion, cfg);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         send({ type: "auth_failed", reason });
@@ -850,7 +881,7 @@ async function handleMessage(
         return;
       }
       stats.cachedAuths += 1;
-      attachToSession(cached, mcVersion, state, send, sessions, stats);
+      attachToSession(cached, target, state, send, sessions, stats);
       return;
     }
 
@@ -1032,7 +1063,7 @@ function attachToSession(
     uuid: string;
     profilesFolder: string;
   },
-  mcVersion: string,
+  target: BridgeServerProfile,
   state: ClientState,
   send: (m: ServerMessage) => void,
   sessions: SessionManager,
@@ -1054,10 +1085,10 @@ function attachToSession(
     const { userId, cacheUserId, ign, uuid, profilesFolder } = authResult;
     if (options.rebuildExisting) {
       sessions.forceCloseUser(userId);
-      recordEvent(stats, "session_rebuild", `${userId}@${mcVersion}`);
+      recordEvent(stats, "session_rebuild", `${userId}@${target.id}@${target.version}`);
     }
-    const sessionId = `${userId}@${mcVersion}`;
-    const attach = sessions.attach(userId, cacheUserId, profilesFolder, mcVersion, listener);
+    const attach = sessions.attach(userId, cacheUserId, profilesFolder, target, listener);
+    const { sessionId } = attach;
     if (attach.created) {
       stats.sessionCreates += 1;
       recordEvent(stats, "session_create", sessionId);
@@ -1089,6 +1120,32 @@ function detachClientSession(state: ClientState, sessions: SessionManager): void
   state.sessionId = null;
 }
 
-function resolveMcVersion(requested: string | undefined, cfg: BridgeConfig): string {
-  return assertSupportedMcVersion(requested?.trim() || cfg.mcVersion);
+function resolveTarget(
+  requestedServerId: string | undefined,
+  requestedMcVersion: string | undefined,
+  cfg: BridgeConfig,
+): BridgeServerProfile {
+  const profile = resolveServerProfile(requestedServerId, cfg);
+  const version = resolveMcVersion(requestedMcVersion, profile.version);
+  if (version === profile.version) return profile;
+  return { ...profile, version };
+}
+
+function resolveServerProfile(
+  requestedServerId: string | undefined,
+  cfg: BridgeConfig,
+): BridgeServerProfile {
+  const id = requestedServerId?.trim().toLowerCase();
+  const fallback = cfg.serverProfiles[0];
+  if (!fallback) throw new Error("no server profiles configured");
+  if (!id) return fallback;
+  const profile = cfg.serverProfiles.find((candidate) => candidate.id === id);
+  if (!profile) {
+    throw new Error(`unknown server profile: ${id}`);
+  }
+  return profile;
+}
+
+function resolveMcVersion(requested: string | undefined, fallback: string): string {
+  return assertSupportedMcVersion(requested?.trim() || fallback);
 }

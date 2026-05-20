@@ -12,6 +12,11 @@ function main() {
   console.log(
     `[bridge] target=${cfg.mcHost}:${cfg.mcPort} version=${cfg.mcVersion} tokensDir=${cfg.tokensDir}`,
   );
+  console.log(
+    `[bridge] profiles=${cfg.serverProfiles
+      .map((profile) => `${profile.id}:${profile.host}:${profile.port}@${profile.version}`)
+      .join(", ")}`,
+  );
 
   const auth = new AuthService(cfg.tokensDir);
   const sessions = new SessionManager(cfg);
