@@ -74,6 +74,12 @@ interface TitleTimingState {
   fadeOut: number;
 }
 
+interface PublicServerStatus {
+  ok: boolean;
+  online?: number;
+  stale?: boolean;
+}
+
 let messageCounter = 0;
 const newId = () => `m-${++messageCounter}-${Date.now()}`;
 const MAX_INPUT_HISTORY = 50;
@@ -109,6 +115,7 @@ export function ChatScreen({
   const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
   const [actionBar, setActionBar] = useState<ActionBarState | null>(null);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlayState | null>(null);
+  const [publicStatus, setPublicStatus] = useState<PublicServerStatus>({ ok: false });
   const [serverInfo, setServerInfo] = useState<{
     server?: string;
     online?: number;
@@ -136,6 +143,26 @@ export function ChatScreen({
   useEffect(() => {
     latestInputRef.current = input;
   }, [input]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const poll = async () => {
+      const next = await fetchPublicServerStatus(bridgeUrl, serverId);
+      if (!cancelled) setPublicStatus(next);
+    };
+
+    void poll();
+    timer = setInterval(() => {
+      void poll();
+    }, 5_000);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [bridgeUrl, serverId]);
 
   const scrollToBottom = useCallback((animated = true) => {
     requestAnimationFrame(() => {
@@ -669,7 +696,7 @@ export function ChatScreen({
   };
 
   const onlineCount =
-    serverInfo.online ?? (playerList.length > 0 ? playerList.length : undefined);
+    publicStatus.online ?? serverInfo.online ?? (playerList.length > 0 ? playerList.length : undefined);
 
   return (
     <KeyboardAvoidingView
@@ -1183,6 +1210,34 @@ function applyCompletion(current: string, value: string): string {
 
   const next = `${prefix}${replacement}`;
   return next.endsWith(" ") ? next : `${next} `;
+}
+
+async function fetchPublicServerStatus(
+  bridgeUrl: string,
+  serverId: string,
+): Promise<PublicServerStatus> {
+  try {
+    const url = new URL(bridgeUrl);
+    url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+    url.pathname = "/status";
+    if (serverId) url.searchParams.set("serverId", serverId);
+
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    if (!response.ok) throw new Error(`status ${response.status}`);
+    const body = (await response.json()) as {
+      ok?: boolean;
+      playersOnline?: unknown;
+      stale?: unknown;
+    };
+    if (!body.ok || typeof body.playersOnline !== "number") return { ok: false };
+    return {
+      ok: true,
+      online: body.playersOnline,
+      stale: body.stale === true,
+    };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function ConnectionPill({
