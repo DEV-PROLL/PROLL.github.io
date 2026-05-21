@@ -23,7 +23,8 @@ await rename(join(distDir, "_expo"), join(distDir, "expo")).catch((err) => {
 const bundleDir = join(distDir, "expo", "static", "js", "web");
 const bundleFile = (await readdir(bundleDir).catch(() => []))
   .find((file) => file.endsWith(".js"));
-const rootBundleFile = bundleFile ? `app-${bundleFile}` : "app.js";
+const rootBundleFile = "app.js";
+const rootBundleVersion = bundleFile?.replace(/\.js$/, "") ?? String(Date.now());
 if (bundleFile) {
   await copyFile(join(bundleDir, bundleFile), join(distDir, rootBundleFile));
 }
@@ -104,7 +105,7 @@ html = html
 
 html = html.replace(
   /src="\.\/expo\/static\/js\/web\/[^"]+\.js"/,
-  `src="./${rootBundleFile}"`,
+  `src="./${rootBundleFile}?v=${encodeURIComponent(rootBundleVersion)}"`,
 );
 
 if (/<title>[\s\S]*?<\/title>/.test(html)) {
