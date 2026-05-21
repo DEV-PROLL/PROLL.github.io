@@ -1184,13 +1184,13 @@ function ConnectionPill({
     label = "접속";
     tone = "online";
   } else if (state === "open" && phase === "kicked") {
-    label = "킥";
+    label = "종료";
     tone = "error";
   } else if (state === "open") {
-    label = "입장";
+    label = "입장중";
     tone = "warning";
   } else if (state === "connecting" || state === "closed") {
-    label = "연결";
+    label = "재연결";
     tone = "warning";
   }
   return <StatusPill label={label} tone={tone} style={styles.pill} />;
@@ -1205,10 +1205,11 @@ function disconnectCopy(
       ? ` 자동 재접속 ${attempts}/${MAX_AUTO_RECONNECTS}`
       : "";
   if (attempts >= MAX_AUTO_RECONNECTS) {
-    return "자동 재접속을 멈췄습니다. 직접 재접속해 주세요.";
+    return "자동 재접속을 멈췄습니다. 재접속 버튼으로 다시 시도해 주세요.";
   }
-  if (phase === "kicked") return `서버에서 연결이 끊겼습니다.${suffix}`;
-  return `서버 연결이 끊겼습니다.${suffix}`;
+  if (phase === "kicked") return `서버가 연결을 종료했습니다.${suffix}`;
+  if (phase === "joining") return `서버 입장을 다시 시도 중입니다.${suffix}`;
+  return `브릿지 연결을 복구 중입니다.${suffix}`;
 }
 
 function GuiWindowModal({

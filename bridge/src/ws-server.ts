@@ -12,6 +12,10 @@ const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 const PENDING_LOGIN_TTL_MS = 20 * 60 * 1000;
 const PENDING_LOGIN_RESULT_TTL_MS = 10 * 60 * 1000;
 const CLIENT_TICKET_TTL_MS = 60 * 1000;
+const RATE_WINDOW_MS = 60 * 1000;
+const WS_UPGRADE_RATE_LIMIT = 120;
+const CLIENT_TICKET_RATE_LIMIT = 80;
+const STATUS_RATE_LIMIT = 240;
 
 interface ClientState {
   ws: WebSocket;
@@ -75,6 +79,11 @@ interface RuntimeStats {
   authenticatedWsCloses: number;
   rejectedToken: number;
   rejectedOrigin: number;
+  rateLimited: number;
+  clientTicketsIssued: number;
+  clientTicketsAccepted: number;
+  clientTicketsRejected: number;
+  clientTicketsExpired: number;
   messagesIn: number;
   messagesRejected: number;
   errorsOut: number;
@@ -105,6 +114,11 @@ interface ClientTicket {
   expiresAt: number;
 }
 
+interface RateLimitBucket {
+  resetAt: number;
+  count: number;
+}
+
 export function startWsServer(
   cfg: BridgeConfig,
   auth: AuthService,
@@ -121,6 +135,11 @@ export function startWsServer(
     authenticatedWsCloses: 0,
     rejectedToken: 0,
     rejectedOrigin: 0,
+    rateLimited: 0,
+    clientTicketsIssued: 0,
+    clientTicketsAccepted: 0,
+    clientTicketsRejected: 0,
+    clientTicketsExpired: 0,
     messagesIn: 0,
     messagesRejected: 0,
     errorsOut: 0,
@@ -138,6 +157,7 @@ export function startWsServer(
   };
   const pendingLogins = new Map<string, PendingLogin>();
   const clientTickets = new Map<string, ClientTicket>();
+  const rateLimits = new Map<string, RateLimitBucket>();
 
   const httpServer = http.createServer((req, res) => {
     void handleHttpRequest(
@@ -149,12 +169,17 @@ export function startWsServer(
       sessions,
       pendingLogins,
       clientTickets,
+      rateLimits,
     );
   });
 
   const wss = new WebSocketServer({
     server: httpServer,
     verifyClient: (info, done) => {
+      if (isRateLimited(stats, rateLimits, info.req, "ws", WS_UPGRADE_RATE_LIMIT)) {
+        recordEvent(stats, "rate_limit", `ws ${maskedClientIp(info.req)}`);
+        return done(false, 429, "rate limited");
+      }
       if (cfg.allowedOrigins) {
         const origin = info.origin ?? "";
         if (!isAllowedOrigin(origin, cfg)) {
@@ -165,10 +190,12 @@ export function startWsServer(
       }
       if (cfg.bridgeToken) {
         const url = new URL(info.req.url ?? "/", "http://bridge.local");
+        const ticket = url.searchParams.get("ticket");
         if (
           !isAuthorizedRequest(info.req, cfg, url) &&
-          !consumeClientTicket(clientTickets, url.searchParams.get("ticket"), info.origin ?? "")
+          !consumeClientTicket(stats, clientTickets, ticket, info.origin ?? "")
         ) {
+          if (ticket) stats.clientTicketsRejected += 1;
           stats.rejectedToken += 1;
           recordEvent(stats, "ws_reject", `invalid token from ${maskedClientIp(info.req)}`);
           return done(false, 401, "invalid bridge token");
@@ -266,6 +293,7 @@ async function handleHttpRequest(
   sessions: SessionManager,
   pendingLogins: Map<string, PendingLogin>,
   clientTickets: Map<string, ClientTicket>,
+  rateLimits: Map<string, RateLimitBucket>,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://bridge.local");
   const headers: Record<string, string> = {
@@ -294,6 +322,11 @@ async function handleHttpRequest(
       res.end(JSON.stringify({ ok: false, error: "method not allowed" }));
       return;
     }
+    if (isRateLimited(stats, rateLimits, req, "ticket", CLIENT_TICKET_RATE_LIMIT)) {
+      res.writeHead(429, { ...headers, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "rate limited" }));
+      return;
+    }
     const origin = headerValue(req.headers.origin);
     if (cfg.allowedOrigins && !isAllowedOrigin(origin, cfg)) {
       res.writeHead(403, { ...headers, "Content-Type": "application/json" });
@@ -301,7 +334,7 @@ async function handleHttpRequest(
       return;
     }
 
-    const ticket = createClientTicket(clientTickets, origin);
+    const ticket = createClientTicket(stats, clientTickets, origin);
     const accessOrigin = origin || "*";
     res.writeHead(200, {
       ...headers,
@@ -321,6 +354,11 @@ async function handleHttpRequest(
   }
 
   if (url.pathname === "/status") {
+    if (isRateLimited(stats, rateLimits, req, "status", STATUS_RATE_LIMIT)) {
+      res.writeHead(429, { ...headers, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "rate limited" }));
+      return;
+    }
     if (
       !isAuthorizedRequest(req, cfg, url) &&
       !isAllowedOrigin(headerValue(req.headers.origin), cfg)
@@ -360,7 +398,7 @@ async function handleHttpRequest(
       "Cache-Control": "no-store",
       "Content-Type": "application/json",
     });
-    res.end(JSON.stringify(buildAdminStatus(cfg, stats, sessions, pendingLogins)));
+    res.end(JSON.stringify(buildAdminStatus(cfg, stats, sessions, pendingLogins, clientTickets)));
     return;
   }
 
@@ -405,19 +443,22 @@ function isAllowedOrigin(origin: string, cfg: BridgeConfig): boolean {
 }
 
 function createClientTicket(
+  stats: RuntimeStats,
   tickets: Map<string, ClientTicket>,
   origin: string,
 ): string {
-  cleanupClientTickets(tickets);
+  stats.clientTicketsExpired += cleanupClientTickets(tickets);
   const ticket = randomUUID();
   tickets.set(ticket, {
     origin,
     expiresAt: Date.now() + CLIENT_TICKET_TTL_MS,
   });
+  stats.clientTicketsIssued += 1;
   return ticket;
 }
 
 function consumeClientTicket(
+  stats: RuntimeStats,
   tickets: Map<string, ClientTicket>,
   ticket: string | null,
   origin: string,
@@ -426,15 +467,60 @@ function consumeClientTicket(
   const entry = tickets.get(ticket);
   tickets.delete(ticket);
   if (!entry) return false;
-  if (entry.expiresAt < Date.now()) return false;
-  return entry.origin === origin;
+  if (entry.expiresAt < Date.now()) {
+    stats.clientTicketsExpired += 1;
+    return false;
+  }
+  if (entry.origin !== origin) return false;
+  stats.clientTicketsAccepted += 1;
+  return true;
 }
 
-function cleanupClientTickets(tickets: Map<string, ClientTicket>): void {
+function cleanupClientTickets(tickets: Map<string, ClientTicket>): number {
   const now = Date.now();
+  let expired = 0;
   for (const [ticket, entry] of tickets) {
-    if (entry.expiresAt < now) tickets.delete(ticket);
+    if (entry.expiresAt < now) {
+      tickets.delete(ticket);
+      expired += 1;
+    }
   }
+  return expired;
+}
+
+function isRateLimited(
+  stats: RuntimeStats,
+  buckets: Map<string, RateLimitBucket>,
+  req: http.IncomingMessage,
+  area: string,
+  limit: number,
+): boolean {
+  const now = Date.now();
+  if (buckets.size > 2000) {
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt <= now) buckets.delete(key);
+    }
+  }
+  const key = `${area}:${clientIpKey(req)}`;
+  const current = buckets.get(key);
+  if (!current || current.resetAt <= now) {
+    buckets.set(key, { resetAt: now + RATE_WINDOW_MS, count: 1 });
+    return false;
+  }
+  current.count += 1;
+  if (current.count <= limit) return false;
+  stats.rateLimited += 1;
+  return true;
+}
+
+function clientIpKey(req: http.IncomingMessage): string {
+  const cfConnectingIp = headerValue(req.headers["cf-connecting-ip"]).trim();
+  if (cfConnectingIp) return cfConnectingIp;
+  const xRealIp = headerValue(req.headers["x-real-ip"]).trim();
+  if (xRealIp) return xRealIp;
+  const forwarded = headerValue(req.headers["x-forwarded-for"]).trim();
+  if (forwarded) return forwarded.split(",")[0]?.trim() || "unknown";
+  return req.socket.remoteAddress ?? "unknown";
 }
 
 function headerValue(value: string | string[] | undefined): string {
@@ -559,11 +645,15 @@ function maskedClientIp(source: unknown): string {
     socket?: { remoteAddress?: string };
     remoteAddress?: string;
   };
-  const forwarded = req.headers?.["x-forwarded-for"];
+  const cfConnectingIp = headerValue(req.headers?.["cf-connecting-ip"]).trim();
+  const xRealIp = headerValue(req.headers?.["x-real-ip"]).trim();
+  const forwarded = headerValue(req.headers?.["x-forwarded-for"]).trim();
   const ip =
-    typeof forwarded === "string" && forwarded.trim()
+    cfConnectingIp ||
+    xRealIp ||
+    (forwarded
       ? forwarded.split(",")[0]?.trim()
-      : req.socket?.remoteAddress ?? req.remoteAddress;
+      : req.socket?.remoteAddress ?? req.remoteAddress);
   if (!ip) return "unknown";
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
     return ip.replace(/\.\d{1,3}$/, ".0");
@@ -580,8 +670,10 @@ function buildAdminStatus(
   stats: RuntimeStats,
   sessions: SessionManager,
   pendingLogins: Map<string, PendingLogin>,
+  clientTickets: Map<string, ClientTicket>,
 ) {
   purgePendingLogins(pendingLogins);
+  stats.clientTicketsExpired += cleanupClientTickets(clientTickets);
   const mem = process.memoryUsage();
   const sessionStats = sessions.stats();
   const memorySamples = recordMemorySample(stats, mem, sessionStats.active);
@@ -606,6 +698,12 @@ function buildAdminStatus(
       tokenRequired: Boolean(cfg.bridgeToken),
       allowedOrigins: cfg.allowedOrigins ?? ["*"],
       maxMessageBytes: MAX_WS_MESSAGE_BYTES,
+      rateWindowMs: RATE_WINDOW_MS,
+      rateLimits: {
+        wsUpgrade: WS_UPGRADE_RATE_LIMIT,
+        clientTicket: CLIENT_TICKET_RATE_LIMIT,
+        status: STATUS_RATE_LIMIT,
+      },
     },
     process: {
       pid: process.pid,
@@ -623,12 +721,21 @@ function buildAdminStatus(
       authenticatedCloses: stats.authenticatedWsCloses,
       rejectedToken: stats.rejectedToken,
       rejectedOrigin: stats.rejectedOrigin,
+      rateLimited: stats.rateLimited,
       messagesIn: stats.messagesIn,
       messagesRejected: stats.messagesRejected,
       errorsOut: stats.errorsOut,
     },
     auth: {
       pendingLogins: pendingLogins.size,
+    },
+    clientTickets: {
+      active: clientTickets.size,
+      issued: stats.clientTicketsIssued,
+      accepted: stats.clientTicketsAccepted,
+      rejected: stats.clientTicketsRejected,
+      expired: stats.clientTicketsExpired,
+      ttlMs: CLIENT_TICKET_TTL_MS,
     },
     counters: {
       cachedAuths: stats.cachedAuths,
@@ -751,7 +858,9 @@ function renderAdminDashboard(): string {
         card("Reconnects", reconnects, "재사용 " + data.counters.sessionReuses + " · 유예복구 " + data.counters.graceReconnects),
         card("Kicks", data.counters.kicked, "최근 " + data.recentKicks.length + "건 보관"),
         card("Memory RSS", data.process.rssMb + " MB", "heap " + data.process.heapUsedMb + "/" + data.process.heapTotalMb + " MB"),
+        card("Tickets", data.clientTickets.active, "issued " + data.clientTickets.issued + " · accepted " + data.clientTickets.accepted),
         card("Rejected", data.websocket.rejectedToken + data.websocket.rejectedOrigin + data.websocket.messagesRejected, "token/origin/message"),
+        card("Rate limit", data.websocket.rateLimited, "ticket " + data.security.rateLimits.clientTicket + "/min · ws " + data.security.rateLimits.wsUpgrade + "/min"),
         card("Auth", data.counters.cachedAuths, "device " + data.counters.deviceLoginCompletions + "/" + data.counters.deviceLoginStarts),
         card("Uptime", fmtDuration(data.uptimeSec), "pid " + data.process.pid)
       );
