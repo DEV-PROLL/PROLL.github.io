@@ -12,6 +12,7 @@ const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 const PENDING_LOGIN_TTL_MS = 20 * 60 * 1000;
 const PENDING_LOGIN_RESULT_TTL_MS = 10 * 60 * 1000;
 const CLIENT_TICKET_TTL_MS = 60 * 1000;
+const STATUS_STALE_TTL_MS = 60 * 1000;
 const RATE_WINDOW_MS = 60 * 1000;
 const WS_UPGRADE_RATE_LIMIT = 120;
 const CLIENT_TICKET_RATE_LIMIT = 80;
@@ -45,6 +46,7 @@ interface ServerStatusBody {
   playersMax?: number;
   version?: string;
   latencyMs?: number;
+  stale?: boolean;
   error?: string;
 }
 
@@ -973,8 +975,23 @@ async function getServerStatus(
   if (cache.value && cache.expiresAt > now) return cache.value;
   if (cache.promise) return cache.promise;
 
+  const previous = cache.value;
   cache.promise = pingMinecraftServer(target)
     .then((status) => {
+      if (
+        !status.ok &&
+        previous?.ok &&
+        Date.now() - previous.updatedAt <= STATUS_STALE_TTL_MS
+      ) {
+        const staleStatus = {
+          ...previous,
+          stale: true,
+          error: status.error,
+        };
+        cache.value = staleStatus;
+        cache.expiresAt = Date.now() + 5_000;
+        return staleStatus;
+      }
       cache.value = status;
       cache.expiresAt = Date.now() + (status.ok ? 5_000 : 2_000);
       return status;
