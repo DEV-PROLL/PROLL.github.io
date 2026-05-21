@@ -315,7 +315,12 @@ async function handleHttpRequest(
   };
 
   if (req.method === "OPTIONS") {
-    res.writeHead(204, headers);
+    const origin = headerValue(req.headers.origin);
+    const corsHeaders =
+      url.pathname === "/client-ticket" || url.pathname === "/status"
+        ? protectedCorsHeaders(headers, origin, cfg)
+        : headers;
+    res.writeHead(204, { ...corsHeaders, "Vary": "Origin" });
     res.end();
     return;
   }
@@ -328,20 +333,33 @@ async function handleHttpRequest(
 
   if (url.pathname === "/client-ticket") {
     if (req.method !== "GET") {
-      res.writeHead(405, { ...headers, "Content-Type": "application/json" });
+      const origin = headerValue(req.headers.origin);
+      res.writeHead(405, {
+        ...protectedCorsHeaders(headers, origin, cfg),
+        "Content-Type": "application/json",
+        "Vary": "Origin",
+      });
       res.end(JSON.stringify({ ok: false, error: "method not allowed" }));
       return;
     }
+    const origin = headerValue(req.headers.origin);
     if (isRateLimited(stats, rateLimits, req, "ticket", CLIENT_TICKET_RATE_LIMIT)) {
-      res.writeHead(429, { ...headers, "Content-Type": "application/json" });
+      res.writeHead(429, {
+        ...protectedCorsHeaders(headers, origin, cfg),
+        "Content-Type": "application/json",
+        "Vary": "Origin",
+      });
       res.end(JSON.stringify({ ok: false, error: "rate limited" }));
       return;
     }
-    const origin = headerValue(req.headers.origin);
     if (cfg.allowedOrigins && !isAllowedOrigin(origin, cfg)) {
       stats.clientTicketsRejected += 1;
       recordEvent(stats, "ticket_reject", `origin ${origin || "(none)"}`);
-      res.writeHead(403, { ...headers, "Content-Type": "application/json" });
+      res.writeHead(403, {
+        ...protectedCorsHeaders(headers, origin, cfg),
+        "Content-Type": "application/json",
+        "Vary": "Origin",
+      });
       res.end(JSON.stringify({ ok: false, error: "origin not allowed" }));
       return;
     }
@@ -365,19 +383,27 @@ async function handleHttpRequest(
 
   if (url.pathname === "/status") {
     stats.statusRequests += 1;
+    const origin = headerValue(req.headers.origin);
     if (isRateLimited(stats, rateLimits, req, "status", STATUS_RATE_LIMIT)) {
-      res.writeHead(429, { ...headers, "Content-Type": "application/json" });
+      res.writeHead(429, {
+        ...protectedCorsHeaders(headers, origin, cfg),
+        "Content-Type": "application/json",
+        "Vary": "Origin",
+      });
       res.end(JSON.stringify({ ok: false, error: "rate limited" }));
       return;
     }
-    const origin = headerValue(req.headers.origin);
     if (
       !isAuthorizedRequest(req, cfg, url) &&
       !isAllowedOrigin(origin, cfg)
     ) {
       stats.statusRejected += 1;
       recordEvent(stats, "status_reject", `origin ${origin || "(none)"}`);
-      res.writeHead(401, { ...headers, "Content-Type": "application/json" });
+      res.writeHead(401, {
+        ...protectedCorsHeaders(headers, origin, cfg),
+        "Content-Type": "application/json",
+        "Vary": "Origin",
+      });
       res.end(JSON.stringify({ ok: false, error: "invalid bridge token" }));
       return;
     }
@@ -388,7 +414,11 @@ async function handleHttpRequest(
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       stats.statusRejected += 1;
-      res.writeHead(404, { ...headers, "Content-Type": "application/json" });
+      res.writeHead(404, {
+        ...protectedCorsHeaders(headers, origin, cfg),
+        "Content-Type": "application/json",
+        "Vary": "Origin",
+      });
       res.end(JSON.stringify({ ok: false, error: reason }));
       return;
     }
