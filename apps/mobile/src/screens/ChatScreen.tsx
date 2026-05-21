@@ -105,6 +105,7 @@ export function ChatScreen({
   const [playerList, setPlayerList] = useState<PlayerSummary[]>([]);
   const [playerListOpen, setPlayerListOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [appInfoOpen, setAppInfoOpen] = useState(false);
   const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
   const [actionBar, setActionBar] = useState<ActionBarState | null>(null);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlayState | null>(null);
@@ -875,7 +876,22 @@ export function ChatScreen({
             setOverflowOpen(false);
             setPlayerListOpen(true);
           }}
+          onOpenAppInfo={() => {
+            setOverflowOpen(false);
+            setAppInfoOpen(true);
+          }}
           onLogout={handleLogoutInternal}
+        />
+
+        <AppInfoModal
+          visible={appInfoOpen}
+          serverAddress={serverAddress}
+          mcVersion={mcVersion}
+          onlineCount={onlineCount}
+          connected={serverInfo.connected}
+          state={state}
+          phase={serverInfo.phase}
+          onClose={() => setAppInfoOpen(false)}
         />
 
         {playerListOpen ? (
@@ -1196,6 +1212,36 @@ function ConnectionPill({
   return <StatusPill label={label} tone={tone} style={styles.pill} />;
 }
 
+function connectionLabel(
+  state: ConnectionState,
+  connected: boolean,
+  phase: "joining" | "online" | "offline" | "kicked",
+): string {
+  if (state === "open" && connected) return "접속됨";
+  if (state === "open" && phase === "kicked") return "서버 종료";
+  if (state === "open") return "입장중";
+  if (state === "connecting" || state === "closed") return "재연결";
+  return "오프라인";
+}
+
+function runtimeModeLabel(): string {
+  if (Platform.OS !== "web") return Platform.OS === "ios" ? "iOS 앱" : "Android 앱";
+  return isStandaloneWebApp() ? "홈 화면 앱" : "브라우저";
+}
+
+function isStandaloneWebApp(): boolean {
+  if (Platform.OS !== "web") return false;
+  const runtime = globalThis as typeof globalThis & {
+    matchMedia?: (query: string) => { matches: boolean };
+    navigator?: Navigator & { standalone?: boolean };
+  };
+  return (
+    Boolean(runtime.navigator?.standalone) ||
+    Boolean(runtime.matchMedia?.("(display-mode: standalone)")?.matches) ||
+    Boolean(runtime.matchMedia?.("(display-mode: fullscreen)")?.matches)
+  );
+}
+
 function disconnectCopy(
   phase: "joining" | "online" | "offline" | "kicked",
   attempts: number,
@@ -1389,6 +1435,7 @@ function OverflowMenuModal({
   onClose,
   onReconnect,
   onOpenPlayers,
+  onOpenAppInfo,
   onLogout,
 }: {
   visible: boolean;
@@ -1403,6 +1450,7 @@ function OverflowMenuModal({
   onClose: () => void;
   onReconnect: () => void;
   onOpenPlayers: () => void;
+  onOpenAppInfo: () => void;
   onLogout: () => void;
 }) {
   return (
@@ -1441,6 +1489,11 @@ function OverflowMenuModal({
               onPress={onOpenPlayers}
             />
             <OverflowMenuRow
+              title="앱 정보"
+              subtitle="실행 모드와 연결 보안 상태를 확인합니다"
+              onPress={onOpenAppInfo}
+            />
+            <OverflowMenuRow
               title="계정 선택으로 나가기"
               subtitle="현재 세션을 끊고 다른 계정으로 접속합니다"
               danger
@@ -1450,6 +1503,67 @@ function OverflowMenuModal({
         </View>
       </View>
     </Modal>
+  );
+}
+
+function AppInfoModal({
+  visible,
+  serverAddress,
+  mcVersion,
+  onlineCount,
+  connected,
+  state,
+  phase,
+  onClose,
+}: {
+  visible: boolean;
+  serverAddress: string;
+  mcVersion: string;
+  onlineCount?: number;
+  connected: boolean;
+  state: ConnectionState;
+  phase: "joining" | "online" | "offline" | "kicked";
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.appInfoBackdrop}>
+        <Pressable style={styles.appInfoBackdropTouch} onPress={onClose} />
+        <View style={[styles.appInfoPanel, WEB_GLASS_BLUR]}>
+          <View style={styles.appInfoHeader}>
+            <View>
+              <Text style={styles.appInfoTitle}>앱 정보</Text>
+              <Text style={styles.appInfoSubtitle}>{runtimeModeLabel()}</Text>
+            </View>
+            <Pressable style={styles.appInfoCloseBtn} onPress={onClose}>
+              <Text style={styles.appInfoCloseText}>×</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.appInfoRows}>
+            <AppInfoRow label="서버" value={serverAddress} />
+            <AppInfoRow label="버전" value={`MC ${mcVersion}`} />
+            <AppInfoRow label="상태" value={connectionLabel(state, connected, phase)} />
+            <AppInfoRow
+              label="인원"
+              value={onlineCount != null ? `${onlineCount}명` : "수신 대기"}
+            />
+            <AppInfoRow label="연결" value="임시 티켓" />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function AppInfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.appInfoRow}>
+      <Text style={styles.appInfoRowLabel}>{label}</Text>
+      <Text style={styles.appInfoRowValue} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -2476,6 +2590,87 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 4,
+  },
+  appInfoBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.42)",
+    paddingHorizontal: 18,
+  },
+  appInfoBackdropTouch: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+  appInfoPanel: {
+    width: "100%",
+    maxWidth: 390,
+    zIndex: 1,
+    backgroundColor: "rgba(13, 17, 23, 0.98)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+    borderRadius: 24,
+    overflow: "hidden",
+  },
+  appInfoHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderBottomColor: theme.glassBorder,
+    borderBottomWidth: 1,
+  },
+  appInfoTitle: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  appInfoSubtitle: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+  appInfoCloseBtn: {
+    width: 38,
+    height: 38,
+    marginLeft: "auto",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 19,
+    backgroundColor: "rgba(240, 246, 252, 0.06)",
+    borderColor: theme.glassBorder,
+    borderWidth: 1,
+  },
+  appInfoCloseText: {
+    color: theme.text,
+    fontSize: 24,
+    lineHeight: 27,
+    fontWeight: "800",
+  },
+  appInfoRows: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+  },
+  appInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 44,
+    borderBottomColor: "rgba(240, 246, 252, 0.06)",
+    borderBottomWidth: 1,
+  },
+  appInfoRowLabel: {
+    width: 72,
+    color: theme.textDim,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  appInfoRowValue: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "800",
+    textAlign: "right",
   },
   playerListBackdrop: {
     flex: 1,
