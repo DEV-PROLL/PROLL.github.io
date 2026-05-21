@@ -86,6 +86,10 @@ interface RuntimeStats {
   clientTicketsAccepted: number;
   clientTicketsRejected: number;
   clientTicketsExpired: number;
+  statusRequests: number;
+  statusOk: number;
+  statusStale: number;
+  statusRejected: number;
   messagesIn: number;
   messagesRejected: number;
   errorsOut: number;
@@ -142,6 +146,10 @@ export function startWsServer(
     clientTicketsAccepted: 0,
     clientTicketsRejected: 0,
     clientTicketsExpired: 0,
+    statusRequests: 0,
+    statusOk: 0,
+    statusStale: 0,
+    statusRejected: 0,
     messagesIn: 0,
     messagesRejected: 0,
     errorsOut: 0,
@@ -331,16 +339,16 @@ async function handleHttpRequest(
     }
     const origin = headerValue(req.headers.origin);
     if (cfg.allowedOrigins && !isAllowedOrigin(origin, cfg)) {
+      stats.clientTicketsRejected += 1;
+      recordEvent(stats, "ticket_reject", `origin ${origin || "(none)"}`);
       res.writeHead(403, { ...headers, "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "origin not allowed" }));
       return;
     }
 
     const ticket = createClientTicket(stats, clientTickets, origin);
-    const accessOrigin = origin || "*";
     res.writeHead(200, {
-      ...headers,
-      "Access-Control-Allow-Origin": accessOrigin,
+      ...protectedCorsHeaders(headers, origin, cfg),
       "Cache-Control": "no-store",
       "Content-Type": "application/json",
       "Vary": "Origin",
@@ -356,15 +364,19 @@ async function handleHttpRequest(
   }
 
   if (url.pathname === "/status") {
+    stats.statusRequests += 1;
     if (isRateLimited(stats, rateLimits, req, "status", STATUS_RATE_LIMIT)) {
       res.writeHead(429, { ...headers, "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "rate limited" }));
       return;
     }
+    const origin = headerValue(req.headers.origin);
     if (
       !isAuthorizedRequest(req, cfg, url) &&
-      !isAllowedOrigin(headerValue(req.headers.origin), cfg)
+      !isAllowedOrigin(origin, cfg)
     ) {
+      stats.statusRejected += 1;
+      recordEvent(stats, "status_reject", `origin ${origin || "(none)"}`);
       res.writeHead(401, { ...headers, "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "invalid bridge token" }));
       return;
@@ -375,15 +387,19 @@ async function handleHttpRequest(
       target = resolveServerProfile(url.searchParams.get("serverId") ?? undefined, cfg);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
+      stats.statusRejected += 1;
       res.writeHead(404, { ...headers, "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: reason }));
       return;
     }
     const status = await getServerStatus(target, statusCaches);
+    if (status.ok) stats.statusOk += 1;
+    if (status.stale) stats.statusStale += 1;
     res.writeHead(200, {
-      ...headers,
+      ...protectedCorsHeaders(headers, origin, cfg),
       "Cache-Control": "no-store",
       "Content-Type": "application/json",
+      "Vary": "Origin",
     });
     res.end(JSON.stringify(status));
     return;
@@ -442,6 +458,22 @@ function isAuthorizedRequest(
 function isAllowedOrigin(origin: string, cfg: BridgeConfig): boolean {
   if (!cfg.allowedOrigins) return true;
   return cfg.allowedOrigins.includes(origin);
+}
+
+function protectedCorsHeaders(
+  headers: Record<string, string>,
+  origin: string,
+  cfg: BridgeConfig,
+): Record<string, string> {
+  if (!cfg.allowedOrigins) return headers;
+  if (!origin || !isAllowedOrigin(origin, cfg)) {
+    const { "Access-Control-Allow-Origin": _ignored, ...withoutOrigin } = headers;
+    return withoutOrigin;
+  }
+  return {
+    ...headers,
+    "Access-Control-Allow-Origin": origin,
+  };
 }
 
 function createClientTicket(
@@ -739,6 +771,12 @@ function buildAdminStatus(
       expired: stats.clientTicketsExpired,
       ttlMs: CLIENT_TICKET_TTL_MS,
     },
+    status: {
+      requests: stats.statusRequests,
+      ok: stats.statusOk,
+      stale: stats.statusStale,
+      rejected: stats.statusRejected,
+    },
     counters: {
       cachedAuths: stats.cachedAuths,
       deviceLoginStarts: stats.deviceLoginStarts,
@@ -861,6 +899,7 @@ function renderAdminDashboard(): string {
         card("Kicks", data.counters.kicked, "최근 " + data.recentKicks.length + "건 보관"),
         card("Memory RSS", data.process.rssMb + " MB", "heap " + data.process.heapUsedMb + "/" + data.process.heapTotalMb + " MB"),
         card("Tickets", data.clientTickets.active, "issued " + data.clientTickets.issued + " · accepted " + data.clientTickets.accepted),
+        card("Status API", data.status.requests, "ok " + data.status.ok + " · stale " + data.status.stale + " · reject " + data.status.rejected),
         card("Rejected", data.websocket.rejectedToken + data.websocket.rejectedOrigin + data.websocket.messagesRejected, "token/origin/message"),
         card("Rate limit", data.websocket.rateLimited, "ticket " + data.security.rateLimits.clientTicket + "/min · ws " + data.security.rateLimits.wsUpgrade + "/min"),
         card("Auth", data.counters.cachedAuths, "device " + data.counters.deviceLoginCompletions + "/" + data.counters.deviceLoginStarts),
