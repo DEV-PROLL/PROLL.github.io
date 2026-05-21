@@ -7,6 +7,7 @@ const distDir = join(projectRoot, "dist");
 const publicDir = join(projectRoot, "public");
 
 await mkdir(distDir, { recursive: true });
+await writeFile(join(distDir, ".nojekyll"), "");
 await copyFile(join(publicDir, "manifest.json"), join(distDir, "manifest.json"));
 await copyFile(join(publicDir, "icon.svg"), join(distDir, "icon.svg"));
 await copyFile(join(publicDir, "icon-180.png"), join(distDir, "icon-180.png"));
