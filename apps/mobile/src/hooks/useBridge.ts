@@ -51,12 +51,12 @@ export function useBridge(
     closedByUs.current = false;
     let cancelled = false;
 
-    const connect = () => {
+    const connect = async () => {
       if (cancelled) return;
       setState("connecting");
       let ws: WebSocket;
       try {
-        ws = new WebSocket(url);
+        ws = new WebSocket(await resolveBridgeWebSocketUrl(url));
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         setLastError(reason);
@@ -99,7 +99,7 @@ export function useBridge(
       reconnectTimer.current = setTimeout(connect, delay);
     };
 
-    connect();
+    void connect();
     return () => {
       cancelled = true;
       closedByUs.current = true;
@@ -122,4 +122,30 @@ export function useBridge(
   }, []);
 
   return { state, send, lastError };
+}
+
+async function resolveBridgeWebSocketUrl(url: string): Promise<string> {
+  const wsUrl = new URL(url);
+  if (wsUrl.searchParams.has("token")) return wsUrl.toString();
+
+  const ticketUrl = new URL(wsUrl.toString());
+  ticketUrl.protocol = ticketUrl.protocol === "wss:" ? "https:" : "http:";
+  ticketUrl.pathname = "/client-ticket";
+  ticketUrl.search = "";
+
+  const response = await fetch(ticketUrl.toString(), { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`ticket ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    ok?: boolean;
+    ticket?: unknown;
+  };
+  if (!body.ok) {
+    throw new Error("ticket request failed");
+  }
+  if (typeof body.ticket === "string" && body.ticket) {
+    wsUrl.searchParams.set("ticket", body.ticket);
+  }
+  return wsUrl.toString();
 }

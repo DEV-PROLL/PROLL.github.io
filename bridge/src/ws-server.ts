@@ -11,6 +11,7 @@ import { assertSupportedMcVersion } from "./mc-versions";
 const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 const PENDING_LOGIN_TTL_MS = 20 * 60 * 1000;
 const PENDING_LOGIN_RESULT_TTL_MS = 10 * 60 * 1000;
+const CLIENT_TICKET_TTL_MS = 60 * 1000;
 
 interface ClientState {
   ws: WebSocket;
@@ -99,6 +100,11 @@ interface PendingLogin {
   promise: Promise<AuthResult>;
 }
 
+interface ClientTicket {
+  origin: string;
+  expiresAt: number;
+}
+
 export function startWsServer(
   cfg: BridgeConfig,
   auth: AuthService,
@@ -131,28 +137,44 @@ export function startWsServer(
     recentEvents: [],
   };
   const pendingLogins = new Map<string, PendingLogin>();
+  const clientTickets = new Map<string, ClientTicket>();
 
   const httpServer = http.createServer((req, res) => {
-    void handleHttpRequest(req, res, cfg, statusCaches, stats, sessions, pendingLogins);
+    void handleHttpRequest(
+      req,
+      res,
+      cfg,
+      statusCaches,
+      stats,
+      sessions,
+      pendingLogins,
+      clientTickets,
+    );
   });
 
   const wss = new WebSocketServer({
     server: httpServer,
     verifyClient: (info, done) => {
+      if (cfg.allowedOrigins) {
+        const origin = info.origin ?? "";
+        if (!isAllowedOrigin(origin, cfg)) {
+          stats.rejectedOrigin += 1;
+          recordEvent(stats, "ws_reject", `origin ${origin || "(none)"}`);
+          return done(false, 403, "origin not allowed");
+        }
+      }
       if (cfg.bridgeToken) {
         const url = new URL(info.req.url ?? "/", "http://bridge.local");
-        if (!isAuthorizedRequest(info.req, cfg, url)) {
+        if (
+          !isAuthorizedRequest(info.req, cfg, url) &&
+          !consumeClientTicket(clientTickets, url.searchParams.get("ticket"), info.origin ?? "")
+        ) {
           stats.rejectedToken += 1;
           recordEvent(stats, "ws_reject", `invalid token from ${maskedClientIp(info.req)}`);
           return done(false, 401, "invalid bridge token");
         }
       }
-      if (!cfg.allowedOrigins) return done(true);
-      const origin = info.origin ?? "";
-      if (cfg.allowedOrigins.includes(origin)) return done(true);
-      stats.rejectedOrigin += 1;
-      recordEvent(stats, "ws_reject", `origin ${origin || "(none)"}`);
-      return done(false, 403, "origin not allowed");
+      return done(true);
     },
   });
 
@@ -243,6 +265,7 @@ async function handleHttpRequest(
   stats: RuntimeStats,
   sessions: SessionManager,
   pendingLogins: Map<string, PendingLogin>,
+  clientTickets: Map<string, ClientTicket>,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://bridge.local");
   const headers: Record<string, string> = {
@@ -265,8 +288,43 @@ async function handleHttpRequest(
     return;
   }
 
+  if (url.pathname === "/client-ticket") {
+    if (req.method !== "GET") {
+      res.writeHead(405, { ...headers, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "method not allowed" }));
+      return;
+    }
+    const origin = headerValue(req.headers.origin);
+    if (cfg.allowedOrigins && !isAllowedOrigin(origin, cfg)) {
+      res.writeHead(403, { ...headers, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "origin not allowed" }));
+      return;
+    }
+
+    const ticket = createClientTicket(clientTickets, origin);
+    const accessOrigin = origin || "*";
+    res.writeHead(200, {
+      ...headers,
+      "Access-Control-Allow-Origin": accessOrigin,
+      "Cache-Control": "no-store",
+      "Content-Type": "application/json",
+      "Vary": "Origin",
+    });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        ticket,
+        expiresAt: Date.now() + CLIENT_TICKET_TTL_MS,
+      }),
+    );
+    return;
+  }
+
   if (url.pathname === "/status") {
-    if (!isAuthorizedRequest(req, cfg, url)) {
+    if (
+      !isAuthorizedRequest(req, cfg, url) &&
+      !isAllowedOrigin(headerValue(req.headers.origin), cfg)
+    ) {
       res.writeHead(401, { ...headers, "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "invalid bridge token" }));
       return;
@@ -339,6 +397,49 @@ function isAuthorizedRequest(
       : null;
   const queryToken = url.searchParams.get("token");
   return queryToken === cfg.bridgeToken || bearerToken === cfg.bridgeToken;
+}
+
+function isAllowedOrigin(origin: string, cfg: BridgeConfig): boolean {
+  if (!cfg.allowedOrigins) return true;
+  return cfg.allowedOrigins.includes(origin);
+}
+
+function createClientTicket(
+  tickets: Map<string, ClientTicket>,
+  origin: string,
+): string {
+  cleanupClientTickets(tickets);
+  const ticket = randomUUID();
+  tickets.set(ticket, {
+    origin,
+    expiresAt: Date.now() + CLIENT_TICKET_TTL_MS,
+  });
+  return ticket;
+}
+
+function consumeClientTicket(
+  tickets: Map<string, ClientTicket>,
+  ticket: string | null,
+  origin: string,
+): boolean {
+  if (!ticket) return false;
+  const entry = tickets.get(ticket);
+  tickets.delete(ticket);
+  if (!entry) return false;
+  if (entry.expiresAt < Date.now()) return false;
+  return entry.origin === origin;
+}
+
+function cleanupClientTickets(tickets: Map<string, ClientTicket>): void {
+  const now = Date.now();
+  for (const [ticket, entry] of tickets) {
+    if (entry.expiresAt < now) tickets.delete(ticket);
+  }
+}
+
+function headerValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
 }
 
 function isLocalAdminRequest(req: http.IncomingMessage): boolean {
