@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +8,10 @@ const publicDir = join(projectRoot, "public");
 
 await mkdir(distDir, { recursive: true });
 await writeFile(join(distDir, ".nojekyll"), "");
+await rm(join(distDir, "expo"), { recursive: true, force: true });
+await rename(join(distDir, "_expo"), join(distDir, "expo")).catch((err) => {
+  if (err?.code !== "ENOENT") throw err;
+});
 await copyFile(join(publicDir, "manifest.json"), join(distDir, "manifest.json"));
 await copyFile(join(publicDir, "icon.svg"), join(distDir, "icon.svg"));
 await copyFile(join(publicDir, "icon-180.png"), join(distDir, "icon-180.png"));
@@ -79,7 +83,8 @@ if (!html.includes("serviceWorker.register")) {
 html = html
   .replaceAll('href="/manifest.json"', 'href="./manifest.json"')
   .replaceAll('href="/icon.svg"', 'href="./icon.svg"')
-  .replaceAll('src="/_expo/', 'src="./_expo/')
+  .replaceAll('src="/_expo/', 'src="./expo/')
+  .replaceAll('src="./_expo/', 'src="./expo/')
   .replaceAll('navigator.serviceWorker.register("/service-worker.js")', 'navigator.serviceWorker.register("./service-worker.js")');
 
 if (/<title>[\s\S]*?<\/title>/.test(html)) {
