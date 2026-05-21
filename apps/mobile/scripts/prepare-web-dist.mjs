@@ -1,4 +1,12 @@
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +20,12 @@ await rm(join(distDir, "expo"), { recursive: true, force: true });
 await rename(join(distDir, "_expo"), join(distDir, "expo")).catch((err) => {
   if (err?.code !== "ENOENT") throw err;
 });
+const bundleDir = join(distDir, "expo", "static", "js", "web");
+const bundleFile = (await readdir(bundleDir).catch(() => []))
+  .find((file) => file.endsWith(".js"));
+if (bundleFile) {
+  await copyFile(join(bundleDir, bundleFile), join(distDir, "app.js"));
+}
 await copyFile(join(publicDir, "manifest.json"), join(distDir, "manifest.json"));
 await copyFile(join(publicDir, "icon.svg"), join(distDir, "icon.svg"));
 await copyFile(join(publicDir, "icon-180.png"), join(distDir, "icon-180.png"));
@@ -86,6 +100,11 @@ html = html
   .replaceAll('src="/_expo/', 'src="./expo/')
   .replaceAll('src="./_expo/', 'src="./expo/')
   .replaceAll('navigator.serviceWorker.register("/service-worker.js")', 'navigator.serviceWorker.register("./service-worker.js")');
+
+html = html.replace(
+  /src="\.\/expo\/static\/js\/web\/[^"]+\.js"/,
+  'src="./app.js"',
+);
 
 if (/<title>[\s\S]*?<\/title>/.test(html)) {
   html = html.replace(/<title>[\s\S]*?<\/title>/, `<title>${appTitle}</title>`);
