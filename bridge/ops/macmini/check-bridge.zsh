@@ -66,6 +66,5 @@ curl -fsS -H "Origin: ${APP_ORIGIN}" "${PUBLIC_BRIDGE_URL}/status?serverId=${SER
 print_section "admin"
 curl -fsS "http://127.0.0.1:${WS_PORT}/admin/status" | json_summary admin
 
-print_section "recent bridge errors"
+print_section "recent bridge stderr"
 tail -n 12 "$HOME/Library/Logs/proll-bridge.err.log" 2>/dev/null || true
-
