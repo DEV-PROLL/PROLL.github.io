@@ -94,6 +94,9 @@ launchctl kickstart -k gui/$(id -u)/com.proll.minecraft-bridge
 # public health
 curl https://bridge.proit.kr/health
 
+# one-shot local operation check without printing secrets
+bridge/ops/macmini/check-bridge.zsh
+
 # admin endpoints are local-only. Use an SSH tunnel from another machine:
 ssh -N -L 18080:127.0.0.1:8080 podo@100.104.132.2
 # then open:
