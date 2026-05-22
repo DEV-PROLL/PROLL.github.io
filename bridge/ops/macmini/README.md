@@ -15,6 +15,11 @@ PWA / iPhone / iPad
 The web app can live on GitHub Pages. The bridge must keep running because it
 owns the Microsoft token cache and the mineflayer sessions.
 
+Production users open the PWA at `https://app.99999.kr/`. The web bundle only
+contains `wss://bridge.proit.kr`; it does not contain `BRIDGE_TOKEN`. The PWA
+gets a short-lived ticket from `https://bridge.proit.kr/client-ticket` before
+opening the WebSocket.
+
 ## Recommended exposure
 
 Prefer one of these in order:
@@ -70,6 +75,8 @@ Cloudflare Tunnel production check:
 ```bash
 curl https://bridge.proit.kr/health
 # {"ok":true}
+curl -H 'Origin: https://app.99999.kr' https://bridge.proit.kr/status
+# {"ok":true,...}
 ```
 
 Stop the manual bridge, then install launchd:

@@ -33,17 +33,21 @@ npm run web:export
 python3 -m http.server 19006 --directory apps/mobile/dist
 ```
 
-`apps/mobile/dist`는 GitHub Pages나 정적 호스팅에 올릴 수 있다. iPhone/iPad에서는 Safari로 접속 후 공유 메뉴의 **홈 화면에 추가**를 사용한다. HTTPS 페이지에서는 브릿지 URL도 `wss://`여야 한다.
+`apps/mobile/dist`는 GitHub Pages나 정적 호스팅에 올릴 수 있다. iPhone/iPad에서는 Safari로 접속 후 공유 메뉴의 **홈 화면에 추가**를 사용한다. Android에서는 Chrome으로 접속 후 **앱 설치** 또는 **홈 화면에 추가**를 사용한다. HTTPS 페이지에서는 브릿지 URL도 `wss://`여야 한다.
 
-운영 빌드에서는 브릿지 주소를 빌드 시 주입한다:
+운영 빌드에서는 브릿지 호스트만 빌드 시 주입한다:
 
 ```bash
-EXPO_PUBLIC_BRIDGE_URL="wss://bridge.proit.kr?token=<BRIDGE_TOKEN>" npm run web:export
+EXPO_PUBLIC_BRIDGE_URL="wss://bridge.proit.kr" npm run web:export
 ```
 
 그러면 일반 사용자는 첫 화면에서 `99999.kr`만 확인하고 로그인 흐름으로 넘어간다.
 내부 프로토콜은 `serverId`를 같이 보내므로, 운영자가 브릿지 `SERVER_PROFILES`와
 앱 UI를 확장하면 나중에 다른 서버도 같은 구조로 붙일 수 있다.
+
+PWA는 WebSocket을 열기 전에 `https://bridge.proit.kr/client-ticket`에서 짧은 수명의 1회용 티켓을 받아 `wss://bridge.proit.kr?ticket=...`로 접속한다. 그래서 웹 번들 안에 장기 `BRIDGE_TOKEN`을 넣지 않는다.
+
+`npm run web:export` 후 준비 스크립트는 GitHub Pages 호환을 위해 `.nojekyll`을 만들고, Expo JS 번들을 루트 `app.js?v=<bundle-hash>`로 복사한다. 배포 직후 오래된 화면이 계속 보이면 Safari/Chrome 새로고침, 홈 화면 앱 재추가, 또는 브라우저 사이트 데이터 삭제를 확인한다.
 
 ## 빌드
 
@@ -56,4 +60,4 @@ npx eas build -p android   # APK/AAB
 ## 보안 주의
 
 - `expo-secure-store`로 브릿지 URL과 `userId`(IGN), 표시용 UUID만 저장. **MS 토큰은 앱에 없음** (브릿지에 보관).
-- PWA에 들어가는 query token은 추출 가능하므로 장기 운영에서는 사용자별 short-lived token 발급 방식을 추가하는 것이 좋다.
+- PWA에는 장기 query token을 넣지 않는다. 운영 브릿지는 허용 Origin에서만 `/client-ticket`을 발급하고, WebSocket은 이 티켓 또는 운영자용 `BRIDGE_TOKEN`이 있어야 열린다.

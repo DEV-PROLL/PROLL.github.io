@@ -19,7 +19,7 @@
 | `MC_HOST` / `MC_PORT` / `MC_VERSION` | 대상 마크 서버 |
 | `SERVER_PROFILES` | 선택 사항. 여러 서버를 JSON 배열로 정의. 없으면 `ludulgi` 단일 프로필이 `MC_*` 값으로 자동 생성됨 |
 | `WS_PORT` | WebSocket(+HTTP) 포트, `/health` 엔드포인트 동일 포트 |
-| `BRIDGE_TOKEN` | 공개 브릿지에서는 필수. 설정 시 `Authorization: Bearer ...` 또는 `ws://host:port?token=...`로만 접속 허용 |
+| `BRIDGE_TOKEN` | 공개 브릿지에서는 필수. 운영자/수동 테스트는 `Authorization: Bearer ...` 또는 `ws://host:port?token=...` 사용 가능. PWA는 `/client-ticket`에서 받은 1회용 `?ticket=...`으로 접속 |
 | `TOKENS_DIR` | 유저별 토큰 캐시 폴더 (운영 시 영구 볼륨) |
 | `ALLOWED_ORIGINS` | WS Origin 화이트리스트(콤마 구분, 비우면 전체 허용) |
 | `MAX_SESSIONS` | 동시 봇 수 상한 |
@@ -43,7 +43,7 @@ SERVER_PROFILES=[{"id":"ludulgi","name":"루둘기","host":"99999.kr","port":255
 현재 PWA는 일반 유저에게 `ludulgi`만 노출한다. 다른 서버는 운영자가 앱 UI를
 열기 전까지 브릿지 프로필로만 준비해 둘 수 있다.
 
-WS 클라이언트로 빠르게 테스트:
+WS 클라이언트로 빠르게 수동 테스트:
 ```bash
 npx wscat -c 'ws://localhost:8080?token=change-this-long-random-token'
 > {"type":"auth_start"}
@@ -57,7 +57,8 @@ npx wscat -c 'ws://localhost:8080?token=change-this-long-random-token'
 
 ## 배포
 
-- 맥미니 + Cloudflare Tunnel 운영 주소: `https://bridge.proit.kr/health`, `wss://bridge.proit.kr?token=<BRIDGE_TOKEN>`.
+- 맥미니 + Cloudflare Tunnel 운영 주소: `https://bridge.proit.kr/health`, `wss://bridge.proit.kr`.
+- PWA는 `https://bridge.proit.kr/client-ticket`에서 1회용 티켓을 받아 `wss://bridge.proit.kr?ticket=...`로 접속한다. 장기 `BRIDGE_TOKEN`은 브릿지 `.env` 안에만 둔다.
 - 맥미니 운영은 `bridge/ops/macmini/README.md` 참고.
 - Fly.io 배포도 가능 (영구 볼륨이 토큰 캐시에 적합).
 - `Dockerfile`과 `fly.toml` 동봉.
@@ -83,6 +84,6 @@ npx wscat -c 'ws://localhost:8080?token=change-this-long-random-token'
 
 - 토큰은 절대 git/로그에 노출되지 않음. `.gitignore`에 `bridge/tokens/` 포함.
 - `BRIDGE_TOKEN`을 설정하면 캐시된 IGN만 알고 세션에 붙는 공격을 막을 수 있음.
-- `ALLOWED_ORIGINS`로 우리 앱 외 접근 차단 권장.
+- `ALLOWED_ORIGINS=https://app.99999.kr`로 우리 앱 외 접근을 차단한다.
 - `CHAT_RATE_LIMIT`과 `MAX_SESSIONS`로 악용 방지.
-- PWA에 query token을 넣는 방식은 배포가 단순하지만 번들에서 추출 가능하다. 운영 보안을 더 올릴 때는 짧은 수명의 사용자별 앱 토큰 발급 계층을 추가한다.
+- PWA 번들에는 장기 query token을 넣지 않는다. `/client-ticket` 티켓은 짧은 수명이며 1회 사용 후 폐기된다.

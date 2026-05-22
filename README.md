@@ -31,7 +31,7 @@ npm run mobile:start
 
 ## 웹/PWA 빌드와 배포
 
-App Store 심사 없이 iPhone, iPad, Android, macOS에서 먼저 쓰기 위해 Expo Web 정적 빌드를 지원한다. 브라우저에서 접속 후 iOS Safari의 **공유 → 홈 화면에 추가**로 앱처럼 설치할 수 있다.
+App Store 심사 없이 iPhone, iPad, Android, macOS에서 먼저 쓰기 위해 Expo Web 정적 빌드를 지원한다. iPhone/iPad는 Safari의 **공유 → 홈 화면에 추가**, Android는 Chrome의 **앱 설치** 또는 **홈 화면에 추가**로 앱처럼 설치할 수 있다.
 
 ```bash
 # 타입체크 + 정적 웹 산출물 생성
@@ -47,15 +47,17 @@ GitHub Pages 배포는 `.github/workflows/deploy-web.yml`이 처리한다. `main
 
 운영 웹 배포는 HTTPS에서 뜨므로 브릿지도 반드시 `wss://...`로 접근 가능해야 한다. 현재 운영 브릿지는 Cloudflare Tunnel을 통해 `https://bridge.proit.kr/health`와 `wss://bridge.proit.kr`로 노출한다. `ws://` 로컬 브릿지는 개발용 또는 같은 사설망 테스트용이다.
 
-일반 유저에게 브릿지 주소를 숨기려면 웹 빌드 시 공개 환경변수로 기본 브릿지를 주입한다:
+일반 유저에게 브릿지 주소를 숨기려면 웹 빌드 시 공개 환경변수로 기본 브릿지 호스트만 주입한다:
 
 ```bash
-EXPO_PUBLIC_BRIDGE_URL="wss://bridge.proit.kr?token=<BRIDGE_TOKEN>" npm run web:export
+EXPO_PUBLIC_BRIDGE_URL="wss://bridge.proit.kr" npm run web:export
 ```
 
-이 값이 있으면 앱 첫 화면은 `99999.kr` 서버 주소 중심으로 동작하고, 브릿지/토큰 입력은 고급 설정으로만 남는다.
+이 값이 있으면 앱 첫 화면은 `99999.kr` 서버 주소 중심으로 동작하고, 브릿지 입력은 고급 설정으로만 남는다. PWA는 접속 직전에 `https://bridge.proit.kr/client-ticket`에서 1회용 짧은 수명의 티켓을 받아 `wss://bridge.proit.kr?ticket=...`로 연결한다. 운영 빌드에 장기 `BRIDGE_TOKEN`을 넣지 않는다.
 
-GitHub Pages 자동 배포에서는 저장소 Settings → Secrets and variables → Actions → Variables에 `EXPO_PUBLIC_BRIDGE_URL=wss://bridge.proit.kr?token=<BRIDGE_TOKEN>` 값을 추가한다. 실제 토큰은 맥미니의 `/Users/podo/PROLL.github.io/bridge/.env`에서 확인하고, README나 커밋에는 남기지 않는다.
+GitHub Pages 자동 배포에서는 저장소 Settings → Secrets and variables → Actions → Variables에 `EXPO_PUBLIC_BRIDGE_URL=wss://bridge.proit.kr` 값을 추가한다. 실제 `BRIDGE_TOKEN`은 맥미니의 `/Users/podo/PROLL.github.io/bridge/.env` 안에만 두고, README/커밋/웹 번들에는 남기지 않는다.
+
+정적 export 후 `apps/mobile/scripts/prepare-web-dist.mjs`는 GitHub Pages 호환을 위해 `.nojekyll`을 만들고, Expo 번들을 루트 `app.js?v=<bundle-hash>`로 복사한다. 배포 후 오래된 홈 화면 앱이 갱신되지 않으면 Safari/Chrome에서 새로고침하거나 홈 화면 앱을 다시 추가한다.
 
 ## 맥에서 로컬 테스트 (iOS 시뮬레이터 + vanilla 서버)
 
@@ -120,7 +122,7 @@ npm run mobile:start
 
 ### 4) 시뮬레이터 안에서
 
-1. **Bridge URL** 입력 화면 — `ws://localhost:8080?token=원하는_긴_토큰` 입력 후 Continue. `BRIDGE_TOKEN`을 비워둔 개발 환경이면 dev 기본값 `ws://localhost:8080` 그대로 가능.
+1. **Bridge URL** 입력 화면 — dev 기본값 `ws://localhost:8080` 그대로 Continue. 앱은 `/client-ticket`을 호출해 1회용 티켓으로 WebSocket에 붙는다. 수동 WebSocket 클라이언트로 테스트할 때만 `ws://localhost:8080?token=원하는_긴_토큰` 형식을 사용한다.
 2. **Sign in with Microsoft** → 디바이스 코드 표시.
 3. "링크 열기" 누르면 시뮬 안 사파리에서 microsoft.com/link 페이지 열림. 코드 입력 → 본인 MS 계정 로그인.
 4. 로그인 완료되면 자동으로 채팅 화면 진입. 마크 서버 콘솔에 `<본인IGN> joined the game` 로그 확인.
@@ -132,7 +134,7 @@ npm run mobile:start
 - **whitelist**: 켜놓고 IGN 추가 안 했으면 즉시 킥됨 (`You are not whitelisted on this server`).
 - **이미 로그인된 본인 클라이언트**: 마크는 같은 계정 동시 접속 불가. 봇이 join하려면 데스크탑 마크 클라이언트는 닫아둘 것 (또는 봇이 들어가 있을 때 데스크탑으로 join하면 봇이 튕긴다).
 - **포트 충돌**: 이미 다른 게 8080을 쓰고 있으면 `WS_PORT=8090`으로 변경하고 시뮬에서도 그 URL로.
-- **실제 iPhone 테스트**: iPhone은 Mac의 `localhost`를 볼 수 없음. 같은 Wi-Fi에서 Mac IP를 확인한 뒤 `ws://192.168.x.x:8080?token=...` 형태로 입력.
+- **실제 iPhone 테스트**: iPhone은 Mac의 `localhost`를 볼 수 없음. 같은 Wi-Fi에서 Mac IP를 확인한 뒤 `ws://192.168.x.x:8080` 형태로 입력. 로컬 브릿지에 `ALLOWED_ORIGINS`를 엄격하게 걸어두면 네이티브/Expo 개발 클라이언트의 Origin이 없어 티켓 발급이 막힐 수 있으니 개발 중에는 비워둔다.
 - **시뮬 사파리에서 MS 로그인 막힘**: 가끔 `aka.ms/AAxxxxxx` 단축 URL이 시뮬에서 부드럽지 않음. 그땐 코드를 복사해서 맥의 사파리/크롬에서 microsoft.com/link 직접 열어 입력해도 됨.
 - **Android 에뮬레이터로 테스트**: `localhost` 대신 `ws://10.0.2.2:8080` (앱이 자동 설정).
 
@@ -151,5 +153,5 @@ npm run mobile:start
 
 - 본인 운영 서버 또는 본인이 허락받은 서버에서만 사용. 다른 서버의 운영 정책상 봇 클라이언트가 금지될 수 있다.
 - 마이크로소프트 토큰은 브릿지의 영구 볼륨에 보관되며 외부로 전송되지 않는다.
-- `BRIDGE_TOKEN` 없이 브릿지를 공개망에 열지 말 것. 운영 배포는 반드시 `wss://`와 별도 접근 제어를 붙이는 것을 권장한다.
-- 현재 v1은 PWA 번들에 브릿지 query token이 포함된다. WebSocket은 토큰 없이는 차단되지만, 장기적으로는 사용자별 short-lived token 발급 방식으로 올리는 것이 더 안전하다.
+- `BRIDGE_TOKEN` 없이 브릿지를 공개망에 열지 말 것. 운영 배포는 반드시 `wss://`, `ALLOWED_ORIGINS`, `/client-ticket` 기반 1회용 티켓을 같이 사용한다.
+- PWA 번들에는 장기 토큰을 포함하지 않는다. 일반 사용자가 보는 값은 `99999.kr` 서버 주소와 앱 도메인뿐이며, WebSocket 연결은 짧은 수명의 티켓으로만 열린다.
