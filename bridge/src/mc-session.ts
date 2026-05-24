@@ -316,12 +316,19 @@ export class McSession extends EventEmitter {
       write(name: string, params: Record<string, unknown>): void;
       state?: string;
     };
+    const clientEmitter = client as unknown as EventEmitter;
+    allowProxyConfigurationRestarts(clientEmitter);
 
     client.on("packet", () => {
       this.lastInboundPacketAt = Date.now();
     });
 
     client.on("start_configuration", () => {
+      dedupeProtocolOnceListeners(clientEmitter, [
+        "select_known_packs",
+        "code_of_conduct",
+        "finish_configuration",
+      ]);
       this.clearBossBars();
       this.emitMsg({
         type: "system",
@@ -1275,6 +1282,27 @@ function writeClientSettings(
   client: { write(name: string, params: Record<string, unknown>): void },
 ): void {
   client.write("settings", {});
+}
+
+function allowProxyConfigurationRestarts(emitter: EventEmitter): void {
+  const currentMax = emitter.getMaxListeners();
+  if (currentMax > 0 && currentMax < 50) {
+    emitter.setMaxListeners(50);
+  }
+}
+
+function dedupeProtocolOnceListeners(emitter: EventEmitter, eventNames: string[]): void {
+  for (const eventName of eventNames) {
+    const onceListeners = emitter.rawListeners(eventName).filter(isOnceWrapper);
+    if (onceListeners.length <= 1) continue;
+    for (const listener of onceListeners.slice(0, -1)) {
+      emitter.off(eventName, listener as (...args: unknown[]) => void);
+    }
+  }
+}
+
+function isOnceWrapper(listener: Function): boolean {
+  return typeof (listener as { listener?: unknown }).listener === "function";
 }
 
 function normalizeKickReason(reason: unknown): string {
