@@ -83,6 +83,15 @@ export type ServerMessage =
       ts: number;
     }
   | {
+      type: "player_state";
+      health?: number;
+      food?: number;
+      saturation?: number;
+      level?: number;
+      xpProgress?: number;
+      ts: number;
+    }
+  | {
       type: "window_open" | "window_update";
       window: GuiWindow;
     }

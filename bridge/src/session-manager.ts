@@ -114,6 +114,8 @@ export class SessionManager {
     if (playerList) onMessage(playerList);
     const bossBars = entry.session.bossBarsSnapshot();
     if (bossBars) onMessage(bossBars);
+    const playerState = entry.session.playerStateSnapshot();
+    if (playerState) onMessage(playerState);
     entry.session.on("message", onMessage);
     return {
       sessionId,

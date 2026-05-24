@@ -23,6 +23,7 @@ import {
 
 type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
 type BossBarsMessage = Extract<ServerMessage, { type: "boss_bars" }>;
+type PlayerStateMessage = Extract<ServerMessage, { type: "player_state" }>;
 type SerializedLoreLine = { text: string; segments?: ChatSegment[] };
 
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
@@ -72,6 +73,7 @@ export class McSession extends EventEmitter {
   private playerListTimer: NodeJS.Timeout | null = null;
   private lastPlayerListSignature = "";
   private lastBossBarsSignature = "";
+  private lastPlayerStateSignature = "";
   private readonly suppressedBossBarIds = new Set<string>();
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
@@ -164,6 +166,12 @@ export class McSession extends EventEmitter {
     bot.on("playerJoined", emitPlayersSoon);
     bot.on("playerLeft", emitPlayersSoon);
     bot.on("playerUpdated", emitPlayersSoon);
+    bot.on("health", () => {
+      this.emitPlayerState();
+    });
+    bot.on("experience", () => {
+      this.emitPlayerState();
+    });
 
     const emitBossBarsSoon = (bar?: { entityUUID?: string }) => {
       if (typeof bar?.entityUUID === "string") {
@@ -527,6 +535,7 @@ export class McSession extends EventEmitter {
     this.detachGuiWindow();
     this.stopPlayerListSync();
     this.lastBossBarsSignature = "";
+    this.lastPlayerStateSignature = "";
     this.suppressedBossBarIds.clear();
     const bot = this.bot;
     this.bot = null;
@@ -550,6 +559,7 @@ export class McSession extends EventEmitter {
     this.detachGuiWindow();
     this.stopPlayerListSync();
     this.lastBossBarsSignature = "";
+    this.lastPlayerStateSignature = "";
     this.suppressedBossBarIds.clear();
     this.connected = false;
     const bot = this.bot;
@@ -608,6 +618,7 @@ export class McSession extends EventEmitter {
     });
     this.emitPlayerList();
     this.emitBossBars();
+    this.emitPlayerState(true);
   }
 
   private startPlayerListSync(): void {
@@ -676,6 +687,52 @@ export class McSession extends EventEmitter {
     return {
       type: "boss_bars",
       bars: this.currentBossBars(),
+      ts: Date.now(),
+    };
+  }
+
+  private emitPlayerState(force = false): void {
+    const msg = this.playerStateSnapshot();
+    if (!msg) return;
+    const signature = JSON.stringify([
+      msg.health ?? "",
+      msg.food ?? "",
+      msg.saturation ?? "",
+      msg.level ?? "",
+      msg.xpProgress ?? "",
+    ]);
+    if (!force && signature === this.lastPlayerStateSignature) return;
+    this.lastPlayerStateSignature = signature;
+    this.emitMsg(msg);
+  }
+
+  playerStateSnapshot(): PlayerStateMessage | null {
+    const bot = this.bot;
+    if (!bot || !this.connected) return null;
+    const experience = (bot as unknown as {
+      experience?: { level?: unknown; progress?: unknown };
+    }).experience;
+    const health = finiteNumber((bot as unknown as { health?: unknown }).health);
+    const food = finiteNumber((bot as unknown as { food?: unknown }).food);
+    const saturation = finiteNumber((bot as unknown as { foodSaturation?: unknown }).foodSaturation);
+    const level = finiteNumber(experience?.level);
+    const xpProgress = finiteNumber(experience?.progress);
+    if (
+      health == null &&
+      food == null &&
+      saturation == null &&
+      level == null &&
+      xpProgress == null
+    ) {
+      return null;
+    }
+    return {
+      type: "player_state",
+      health: clampRange(health, 0, 20),
+      food: clampRange(food, 0, 20),
+      saturation: clampRange(saturation, 0, 20),
+      level: level == null ? undefined : Math.max(0, Math.floor(level)),
+      xpProgress: clamp01(xpProgress ?? 0),
       ts: Date.now(),
     };
   }
@@ -868,6 +925,14 @@ function bossBarTitle(title: unknown): string {
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function clampRange(value: number | undefined, min: number, max: number): number | undefined {
+  return value == null ? undefined : Math.max(min, Math.min(max, value));
 }
 
 function serializeWindow(window: Window): GuiWindow {

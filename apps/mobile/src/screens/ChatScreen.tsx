@@ -57,6 +57,14 @@ interface ActionBarState {
   ts: number;
 }
 
+interface PlayerVitals {
+  health?: number;
+  food?: number;
+  saturation?: number;
+  level?: number;
+  xpProgress?: number;
+}
+
 interface TitleLineState {
   text: string;
   segments?: ChatSegment[];
@@ -113,6 +121,7 @@ export function ChatScreen({
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [appInfoOpen, setAppInfoOpen] = useState(false);
   const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
+  const [playerVitals, setPlayerVitals] = useState<PlayerVitals | null>(null);
   const [actionBar, setActionBar] = useState<ActionBarState | null>(null);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlayState | null>(null);
   const [publicStatus, setPublicStatus] = useState<PublicServerStatus>({ ok: false });
@@ -234,6 +243,7 @@ export function ChatScreen({
             setPendingSlot(null);
             setPlayerList([]);
             setBossBars([]);
+            setPlayerVitals(null);
             clearTransientOverlays();
           }
           if (msg.connected) {
@@ -268,6 +278,15 @@ export function ChatScreen({
           break;
         case "boss_bars":
           setBossBars(msg.bars);
+          break;
+        case "player_state":
+          setPlayerVitals({
+            health: msg.health,
+            food: msg.food,
+            saturation: msg.saturation,
+            level: msg.level,
+            xpProgress: msg.xpProgress,
+          });
           break;
         case "action_bar":
           setActionBar({ text: msg.text, segments: msg.segments, ts: msg.ts });
@@ -347,6 +366,7 @@ export function ChatScreen({
           setPendingSlot(null);
           setPlayerList([]);
           setBossBars([]);
+          setPlayerVitals(null);
           clearTransientOverlays();
           setMessages((prev) => [
             ...prev,
@@ -751,6 +771,7 @@ export function ChatScreen({
           </View>
         </View>
 
+        {playerVitals ? <VitalsStrip vitals={playerVitals} /> : null}
         {bossBars.length > 0 ? <BossBarStack bars={bossBars} /> : null}
         {titleOverlay ? <TitleOverlay overlay={titleOverlay} /> : null}
         {actionBar ? (
@@ -1076,6 +1097,74 @@ function bossBarColor(color: string): string {
     default:
       return "#a371f7";
   }
+}
+
+function VitalsStrip({ vitals }: { vitals: PlayerVitals }) {
+  const health = typeof vitals.health === "number" ? vitals.health : null;
+  const food = typeof vitals.food === "number" ? vitals.food : null;
+  const level = typeof vitals.level === "number" ? vitals.level : null;
+  const xpProgress = typeof vitals.xpProgress === "number" ? vitals.xpProgress : 0;
+  if (health == null && food == null && level == null) return null;
+  return (
+    <View style={styles.vitalsStrip}>
+      {health != null ? (
+        <VitalMeter
+          label="체력"
+          value={`${Math.round(health)}/20`}
+          progress={health / 20}
+          tone="health"
+        />
+      ) : null}
+      {food != null ? (
+        <VitalMeter
+          label="허기"
+          value={`${Math.round(food)}/20`}
+          progress={food / 20}
+          tone="food"
+        />
+      ) : null}
+      {level != null ? (
+        <VitalMeter label="레벨" value={`${level}`} progress={xpProgress} tone="xp" />
+      ) : null}
+    </View>
+  );
+}
+
+function VitalMeter({
+  label,
+  value,
+  progress,
+  tone,
+}: {
+  label: string;
+  value: string;
+  progress: number;
+  tone: "health" | "food" | "xp";
+}) {
+  return (
+    <View style={styles.vitalMeter}>
+      <View style={styles.vitalCopy}>
+        <Text style={styles.vitalLabel}>{label}</Text>
+        <Text style={styles.vitalValue}>{value}</Text>
+      </View>
+      <View style={styles.vitalTrack}>
+        <View
+          style={[
+            styles.vitalFill,
+            { width: `${Math.max(3, Math.round(clamp01(progress) * 100))}%` },
+            tone === "health" ? styles.vitalFillHealth : null,
+            tone === "food" ? styles.vitalFillFood : null,
+            tone === "xp" ? styles.vitalFillXp : null,
+          ]}
+        />
+      </View>
+    </View>
+  );
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 function Row({
@@ -2028,6 +2117,61 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 12,
     fontWeight: "800",
+  },
+  vitalsStrip: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    backgroundColor: "rgba(13, 17, 23, 0.92)",
+    borderBottomColor: theme.glassBorder,
+    borderBottomWidth: 1,
+  },
+  vitalMeter: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: "rgba(240, 246, 252, 0.04)",
+    borderColor: "rgba(240, 246, 252, 0.08)",
+    borderWidth: 1,
+  },
+  vitalCopy: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+    marginBottom: 5,
+  },
+  vitalLabel: {
+    color: theme.textDim,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  vitalValue: {
+    color: theme.text,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  vitalTrack: {
+    height: 4,
+    borderRadius: 2,
+    overflow: "hidden",
+    backgroundColor: "rgba(240, 246, 252, 0.1)",
+  },
+  vitalFill: {
+    height: "100%",
+    borderRadius: 2,
+  },
+  vitalFillHealth: {
+    backgroundColor: "#f85149",
+  },
+  vitalFillFood: {
+    backgroundColor: "#f2cc60",
+  },
+  vitalFillXp: {
+    backgroundColor: theme.accent,
   },
   bossBarStack: {
     paddingHorizontal: 18,
