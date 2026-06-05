@@ -55,6 +55,7 @@ TOKENS_DIR=./bridge/tokens
 ALLOWED_ORIGINS=https://app.99999.kr
 MAX_SESSIONS=20
 CHAT_RATE_LIMIT=2
+SESSION_GRACE_MS=1800000
 ```
 
 Build and test:

@@ -185,4 +185,5 @@ export interface BridgeConfig {
   allowedOrigins: string[] | null;
   maxSessions: number;
   chatRateLimit: number;
+  sessionGraceMs: number;
 }

@@ -24,6 +24,7 @@
 | `ALLOWED_ORIGINS` | WS Origin 화이트리스트(콤마 구분, 비우면 전체 허용) |
 | `MAX_SESSIONS` | 동시 봇 수 상한 |
 | `CHAT_RATE_LIMIT` | 유저당 초당 채팅 횟수 |
+| `SESSION_GRACE_MS` | 앱 WebSocket이 끊긴 뒤 봇 세션을 유지할 시간. 기본값 `1800000`(30분). 명시적 `logout`은 즉시 퇴장 |
 
 ## 실행
 

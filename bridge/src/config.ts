@@ -12,6 +12,14 @@ function num(name: string, fallback: number): number {
   return n;
 }
 
+function positiveInt(name: string, fallback: number): number {
+  const n = num(name, fallback);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`env ${name} must be a positive integer: ${n}`);
+  }
+  return n;
+}
+
 function str(name: string, fallback?: string): string {
   const v = process.env[name];
   if (v != null && v !== "") return v;
@@ -46,6 +54,7 @@ export function loadConfig(): BridgeConfig {
     allowedOrigins: allowed ? allowed.split(",").map((s) => s.trim()) : null,
     maxSessions: num("MAX_SESSIONS", 20),
     chatRateLimit: num("CHAT_RATE_LIMIT", 2),
+    sessionGraceMs: positiveInt("SESSION_GRACE_MS", 30 * 60 * 1000),
   };
 }
 

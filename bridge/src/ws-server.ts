@@ -762,6 +762,7 @@ function buildAdminStatus(
       tokenRequired: Boolean(cfg.bridgeToken),
       allowedOrigins: cfg.allowedOrigins ?? ["*"],
       maxMessageBytes: MAX_WS_MESSAGE_BYTES,
+      sessionGraceMs: cfg.sessionGraceMs,
       rateWindowMs: RATE_WINDOW_MS,
       rateLimits: {
         wsUpgrade: WS_UPGRADE_RATE_LIMIT,
@@ -926,6 +927,7 @@ function renderAdminDashboard(): string {
         card("Sessions", data.sessions.active + "/" + data.sessions.max, activeNames || "활성 계정 없음"),
         card("Profiles", (data.serverProfiles || []).length, profileNames || "기본 서버"),
         card("Reconnects", reconnects, "재사용 " + data.counters.sessionReuses + " · 유예복구 " + data.counters.graceReconnects),
+        card("Background", fmtDuration(Math.floor(data.security.sessionGraceMs / 1000)), "WS 종료 후 세션 유지"),
         card("Kicks", data.counters.kicked, "최근 " + data.recentKicks.length + "건 보관"),
         card("Memory RSS", data.process.rssMb + " MB", "heap " + data.process.heapUsedMb + "/" + data.process.heapTotalMb + " MB"),
         card("Tickets", data.clientTickets.active, "issued " + data.clientTickets.issued + " · accepted " + data.clientTickets.accepted),

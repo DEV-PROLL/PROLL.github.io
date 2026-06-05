@@ -7,11 +7,10 @@ interface ManagedSession {
   target: BridgeServerProfile;
   refCount: number;          // how many WS clients are attached
   graceTimer: NodeJS.Timeout | null; // pending shutdown when refCount drops to 0
+  graceExpiresAt: number | null;
   createdAt: number;
   lastAttachedAt: number;
 }
-
-const GRACE_MS = 5 * 1000;
 
 export interface ManagedSessionSummary {
   sessionId: string;
@@ -27,6 +26,7 @@ export interface ManagedSessionSummary {
   createdAt: number;
   lastAttachedAt: number;
   closing: boolean;
+  closesAt?: number;
 }
 
 export interface SessionManagerStats {
@@ -84,6 +84,7 @@ export class SessionManager {
         target,
         refCount: 0,
         graceTimer: null,
+        graceExpiresAt: null,
         createdAt: now,
         lastAttachedAt: now,
       };
@@ -100,6 +101,7 @@ export class SessionManager {
     if (entry.graceTimer) {
       clearTimeout(entry.graceTimer);
       entry.graceTimer = null;
+      entry.graceExpiresAt = null;
     }
     entry.refCount += 1;
     entry.lastAttachedAt = Date.now();
@@ -132,13 +134,11 @@ export class SessionManager {
     entry.session.off("message", listener);
     entry.refCount = Math.max(0, entry.refCount - 1);
     if (entry.refCount === 0) {
-      // Wait briefly before disconnecting the bot in case the user is just
-      // losing network for a moment. Keep this short so server-side player
-      // counts reflect closed mobile sessions quickly.
+      entry.graceExpiresAt = Date.now() + this.cfg.sessionGraceMs;
       entry.graceTimer = setTimeout(() => {
         entry.session.shutdown("client disconnected");
         this.sessions.delete(sessionId);
-      }, GRACE_MS);
+      }, this.cfg.sessionGraceMs);
     }
   }
 
@@ -149,6 +149,7 @@ export class SessionManager {
     if (entry.graceTimer) {
       clearTimeout(entry.graceTimer);
       entry.graceTimer = null;
+      entry.graceExpiresAt = null;
     }
     entry.session.shutdown("logout");
     this.sessions.delete(sessionId);
@@ -160,6 +161,7 @@ export class SessionManager {
       if (entry.graceTimer) {
         clearTimeout(entry.graceTimer);
         entry.graceTimer = null;
+        entry.graceExpiresAt = null;
       }
       entry.session.shutdown("account forgotten");
       this.sessions.delete(sessionId);
@@ -194,6 +196,7 @@ export class SessionManager {
           createdAt: entry.createdAt,
           lastAttachedAt: entry.lastAttachedAt,
           closing: Boolean(entry.graceTimer),
+          closesAt: entry.graceExpiresAt ?? undefined,
         };
       }),
     };

@@ -103,6 +103,7 @@ MC_VERSION=1.21.11  # 본인 server.jar 버전과 일치시킬 것
 WS_PORT=8080
 BRIDGE_TOKEN=원하는_긴_토큰
 TOKENS_DIR=./tokens
+SESSION_GRACE_MS=1800000
 ```
 
 ```bash

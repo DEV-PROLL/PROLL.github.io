@@ -92,6 +92,7 @@ let messageCounter = 0;
 const newId = () => `m-${++messageCounter}-${Date.now()}`;
 const MAX_INPUT_HISTORY = 50;
 const MAX_AUTO_RECONNECTS = 6;
+const BACKGROUND_SESSION_LABEL = "잠시 닫아도 유지";
 const DEFAULT_TITLE_TIMING: TitleTimingState = { fadeIn: 10, stay: 70, fadeOut: 20 };
 const WEB_GLASS_BLUR =
   Platform.OS === "web"
@@ -700,7 +701,7 @@ export function ChatScreen({
     setPendingSlot(null);
   };
 
-  const handleLogoutInternal = () => {
+  const handleExitServer = () => {
     setOverflowOpen(false);
     send({ type: "logout" });
     onLogout();
@@ -726,7 +727,12 @@ export function ChatScreen({
     >
       <View style={styles.chatShell}>
         <View style={styles.header}>
-          <Pressable style={styles.backBtn} onPress={handleLogoutInternal}>
+          <Pressable
+            accessibilityLabel="서버에서 나가기"
+            accessibilityRole="button"
+            style={styles.backBtn}
+            onPress={handleExitServer}
+          >
             <Text style={styles.backText}>‹</Text>
           </Pressable>
           <MinecraftHead uuid={uuid} size={46} style={styles.headerHead} />
@@ -928,7 +934,7 @@ export function ChatScreen({
             setOverflowOpen(false);
             setAppInfoOpen(true);
           }}
-          onLogout={handleLogoutInternal}
+          onExitServer={handleExitServer}
         />
 
         <AppInfoModal
@@ -1580,7 +1586,7 @@ function OverflowMenuModal({
   onReconnect,
   onOpenPlayers,
   onOpenAppInfo,
-  onLogout,
+  onExitServer,
 }: {
   visible: boolean;
   ign: string;
@@ -1595,7 +1601,7 @@ function OverflowMenuModal({
   onReconnect: () => void;
   onOpenPlayers: () => void;
   onOpenAppInfo: () => void;
-  onLogout: () => void;
+  onExitServer: () => void;
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -1638,10 +1644,10 @@ function OverflowMenuModal({
               onPress={onOpenAppInfo}
             />
             <OverflowMenuRow
-              title="계정 선택으로 나가기"
-              subtitle="현재 세션을 끊고 다른 계정으로 접속합니다"
+              title="서버에서 나가기"
+              subtitle="서버에서 즉시 퇴장하고 계정 선택으로 이동합니다"
               danger
-              onPress={onLogout}
+              onPress={onExitServer}
             />
           </View>
         </View>
@@ -1688,6 +1694,7 @@ function AppInfoModal({
             <AppInfoRow label="서버" value={serverAddress} />
             <AppInfoRow label="버전" value={`MC ${mcVersion}`} />
             <AppInfoRow label="상태" value={connectionLabel(state, connected, phase)} />
+            <AppInfoRow label="백그라운드" value={BACKGROUND_SESSION_LABEL} />
             <AppInfoRow
               label="인원"
               value={onlineCount != null ? `${onlineCount}명` : "수신 대기"}
