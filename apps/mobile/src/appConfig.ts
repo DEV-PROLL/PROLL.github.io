@@ -15,6 +15,13 @@ export const MOVEMENT_PANEL_ENABLED =
   // Initial private rollout cohort requested by the movement coordinator.
   movementFeature === "_pelol";
 
+const movementTestIgn =
+  typeof process !== "undefined"
+    ? process.env.EXPO_PUBLIC_MOVEMENT_TEST_IGN?.trim()
+    : undefined;
+
+export const MOVEMENT_TEST_IGN = movementTestIgn || "vmfhf";
+
 export function normalizeServerId(value: string | null | undefined): string {
   const trimmed = value?.trim().toLowerCase();
   if (!trimmed || trimmed === "rudulgi") return DEFAULT_SERVER_ID;

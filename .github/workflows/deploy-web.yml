@@ -38,8 +38,11 @@ jobs:
       - name: Typecheck mobile
         run: npm run typecheck -w mobile
 
-      - name: Build bridge
-        run: npm run bridge:build
+      - name: Test mobile
+        run: npm test -w mobile
+
+      - name: Test bridge
+        run: npm test -w bridge
 
       - name: Export web app
         run: |
@@ -51,6 +54,8 @@ jobs:
           npm run web:export
         env:
           EXPO_PUBLIC_BRIDGE_URL: ${{ secrets.EXPO_PUBLIC_BRIDGE_URL }}
+          EXPO_PUBLIC_MOVEMENT_ENABLED: ${{ vars.EXPO_PUBLIC_MOVEMENT_ENABLED }}
+          EXPO_PUBLIC_MOVEMENT_TEST_IGN: ${{ vars.EXPO_PUBLIC_MOVEMENT_TEST_IGN }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

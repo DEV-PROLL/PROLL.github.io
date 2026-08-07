@@ -55,7 +55,14 @@ export function loadConfig(): BridgeConfig {
     maxSessions: num("MAX_SESSIONS", 20),
     chatRateLimit: num("CHAT_RATE_LIMIT", 2),
     sessionGraceMs: positiveInt("SESSION_GRACE_MS", 30 * 60 * 1000),
+    movementAllowedIgns: csv("MOVEMENT_ALLOWED_IGNS"),
   };
+}
+
+function csv(name: string): string[] {
+  const value = process.env[name]?.trim();
+  if (!value) return [];
+  return [...new Set(value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean))];
 }
 
 function parseServerProfiles(

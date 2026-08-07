@@ -5,6 +5,7 @@ const {
   MOVEMENT_RATE_LIMIT,
   MovementLeaseBook,
   MovementRateGate,
+  isMovementAllowed,
   parseMovementControlMessage,
 } = require("../dist/movement-control.js");
 const {
@@ -109,6 +110,13 @@ test("movement parser accepts only bounded known controls", () => {
   });
   assert.equal(rejectedControl.ok, false);
   assert.equal(rejectedHold.ok, false);
+});
+
+test("movement authorization is fail-closed and case-insensitive", () => {
+  assert.equal(isMovementAllowed("vmfhf", []), false);
+  assert.equal(isMovementAllowed(null, ["vmfhf"]), false);
+  assert.equal(isMovementAllowed("VMFHF", ["vmfhf"]), true);
+  assert.equal(isMovementAllowed("other", ["vmfhf"]), false);
 });
 
 test("maps Mineflayer yaw from north through its right-handed rotation", () => {

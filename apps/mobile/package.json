@@ -9,6 +9,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "icons:generate": "node scripts/generate-pwa-icons.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "web:export": "expo export --platform web && node scripts/prepare-web-dist.mjs",
     "typecheck": "tsc --noEmit"
   },

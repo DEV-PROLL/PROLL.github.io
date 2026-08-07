@@ -8,7 +8,11 @@ import { AuthService, type AuthResult, type DeviceCode } from "./auth";
 import type { McSession } from "./mc-session";
 import type { SessionManager } from "./session-manager";
 import { assertSupportedMcVersion } from "./mc-versions";
-import { MovementRateGate, parseMovementControlMessage } from "./movement-control";
+import {
+  isMovementAllowed,
+  MovementRateGate,
+  parseMovementControlMessage,
+} from "./movement-control";
 
 const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 const PENDING_LOGIN_TTL_MS = 20 * 60 * 1000;
@@ -194,6 +198,8 @@ export function startWsServer(
 
   const wss = new WebSocketServer({
     server: httpServer,
+    maxPayload: MAX_WS_MESSAGE_BYTES,
+    perMessageDeflate: false,
     verifyClient: (info, done) => {
       if (isRateLimited(stats, rateLimits, info.req, "ws", WS_UPGRADE_RATE_LIMIT)) {
         recordEvent(stats, "rate_limit", `ws ${maskedClientIp(info.req)}`);
@@ -787,6 +793,7 @@ function buildAdminStatus(
       allowedOrigins: cfg.allowedOrigins ?? ["*"],
       maxMessageBytes: MAX_WS_MESSAGE_BYTES,
       sessionGraceMs: cfg.sessionGraceMs,
+      movementAllowedIgnCount: cfg.movementAllowedIgns.length,
       rateWindowMs: RATE_WINDOW_MS,
       rateLimits: {
         wsUpgrade: WS_UPGRADE_RATE_LIMIT,
@@ -1289,6 +1296,11 @@ async function handleMessage(
     case "movement_control": {
       if (!state.mcSession) {
         send({ type: "error", text: "not authenticated" });
+        return;
+      }
+      if (!isMovementAllowed(state.authenticatedUserId, cfg.movementAllowedIgns)) {
+        stats.messagesRejected += 1;
+        send({ type: "error", text: "movement is not enabled for this account" });
         return;
       }
       const parsed = parseMovementControlMessage(msg);

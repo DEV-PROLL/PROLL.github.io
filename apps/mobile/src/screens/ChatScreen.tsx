@@ -24,12 +24,15 @@ import type {
   GuiItem,
   GuiSlot,
   GuiWindow,
+  PlayerPosition,
   PlayerSummary,
   ServerMessage,
 } from "../protocol";
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
 import { MinecraftItemIcon } from "../components/MinecraftItemIcon";
+import { MovementPanel } from "../components/MovementPanel";
+import { MOVEMENT_PANEL_ENABLED, MOVEMENT_TEST_IGN } from "../appConfig";
 
 interface Props {
   bridgeUrl: string;
@@ -122,6 +125,8 @@ export function ChatScreen({
   const [playerListOpen, setPlayerListOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [appInfoOpen, setAppInfoOpen] = useState(false);
+  const [movementOpen, setMovementOpen] = useState(false);
+  const [position, setPosition] = useState<PlayerPosition | null>(null);
   const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
   const [playerVitals, setPlayerVitals] = useState<PlayerVitals | null>(null);
   const [actionBar, setActionBar] = useState<ActionBarState | null>(null);
@@ -246,6 +251,8 @@ export function ChatScreen({
             setPlayerList([]);
             setBossBars([]);
             setPlayerVitals(null);
+            setPosition(null);
+            setMovementOpen(false);
             clearTransientOverlays();
           }
           if (msg.connected) {
@@ -288,6 +295,18 @@ export function ChatScreen({
             saturation: msg.saturation,
             level: msg.level,
             xpProgress: msg.xpProgress,
+          });
+          break;
+        case "position":
+          setPosition({
+            x: msg.x,
+            y: msg.y,
+            z: msg.z,
+            yaw: msg.yaw,
+            direction: msg.direction,
+            dimension: msg.dimension,
+            grounded: msg.grounded,
+            ts: msg.ts,
           });
           break;
         case "action_bar":
@@ -369,6 +388,8 @@ export function ChatScreen({
           setPlayerList([]);
           setBossBars([]);
           setPlayerVitals(null);
+          setPosition(null);
+          setMovementOpen(false);
           clearTransientOverlays();
           setMessages((prev) => [
             ...prev,
@@ -406,6 +427,8 @@ export function ChatScreen({
           setSelectedWindowSlot(null);
           setPreviewWindowSlot(null);
           setPendingSlot(null);
+          setPosition(null);
+          setMovementOpen(false);
           clearTransientOverlays();
           setServerInfo((prev) => ({
             ...prev,
@@ -704,9 +727,16 @@ export function ChatScreen({
 
   const handleExitServer = () => {
     setOverflowOpen(false);
+    setMovementOpen(false);
+    send({ type: "movement_stop_all" });
     send({ type: "logout" });
     onLogout();
   };
+
+  const closeMovement = useCallback(() => {
+    send({ type: "movement_stop_all" });
+    setMovementOpen(false);
+  }, [send]);
 
   const handlePlayerSelect = (player: PlayerSummary) => {
     const whisper = `/귓 ${player.name} `;
@@ -719,6 +749,9 @@ export function ChatScreen({
 
   const onlineCount =
     publicStatus.online ?? serverInfo.online ?? (playerList.length > 0 ? playerList.length : undefined);
+  const movementAllowed =
+    MOVEMENT_PANEL_ENABLED &&
+    ign.trim().toLowerCase() === MOVEMENT_TEST_IGN.trim().toLowerCase();
 
   return (
     <KeyboardAvoidingView
@@ -936,8 +969,22 @@ export function ChatScreen({
             setOverflowOpen(false);
             setAppInfoOpen(true);
           }}
+          movementAllowed={movementAllowed}
+          onOpenMovement={() => {
+            setOverflowOpen(false);
+            setMovementOpen(true);
+          }}
           onExitServer={handleExitServer}
         />
+
+        {movementOpen && movementAllowed ? (
+          <MovementModal
+            connected={serverInfo.connected}
+            position={position}
+            send={send}
+            onClose={closeMovement}
+          />
+        ) : null}
 
         <AppInfoModal
           visible={appInfoOpen}
@@ -1604,6 +1651,8 @@ function OverflowMenuModal({
   onReconnect,
   onOpenPlayers,
   onOpenAppInfo,
+  movementAllowed,
+  onOpenMovement,
   onExitServer,
 }: {
   visible: boolean;
@@ -1619,6 +1668,8 @@ function OverflowMenuModal({
   onReconnect: () => void;
   onOpenPlayers: () => void;
   onOpenAppInfo: () => void;
+  movementAllowed: boolean;
+  onOpenMovement: () => void;
   onExitServer: () => void;
 }) {
   return (
@@ -1656,6 +1707,13 @@ function OverflowMenuModal({
               subtitle="탭하면 귓속말 입력창에 닉네임을 불러옵니다"
               onPress={onOpenPlayers}
             />
+            {movementAllowed ? (
+              <OverflowMenuRow
+                title="이동 및 좌표"
+                subtitle="누르는 동안만 이동하며 창을 닫으면 즉시 멈춥니다"
+                onPress={onOpenMovement}
+              />
+            ) : null}
             <OverflowMenuRow
               title="앱 정보"
               subtitle="실행 모드와 연결 보안 상태를 확인합니다"
@@ -1668,6 +1726,46 @@ function OverflowMenuModal({
               onPress={onExitServer}
             />
           </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function MovementModal({
+  connected,
+  position,
+  send,
+  onClose,
+}: {
+  connected: boolean;
+  position: PlayerPosition | null;
+  send: ReturnType<typeof useBridge>["send"];
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.movementBackdrop}>
+        <Pressable style={styles.movementBackdropTouch} onPress={onClose} />
+        <View style={[styles.movementSheet, WEB_GLASS_BLUR]}>
+          <View style={styles.movementHeader}>
+            <View style={styles.movementHeaderCopy}>
+              <Text style={styles.movementTitle}>이동 및 좌표</Text>
+              <Text style={styles.movementSubtitle}>손을 떼거나 창을 닫으면 즉시 정지합니다</Text>
+            </View>
+            <Pressable
+              accessibilityLabel="이동 창 닫기"
+              accessibilityRole="button"
+              style={({ pressed }) => [
+                styles.movementClose,
+                pressed ? styles.movementClosePressed : null,
+              ]}
+              onPress={onClose}
+            >
+              <Text style={styles.movementCloseText}>×</Text>
+            </Pressable>
+          </View>
+          <MovementPanel connected={connected} position={position} send={send} enabled />
         </View>
       </View>
     </Modal>
@@ -2820,6 +2918,75 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 4,
+  },
+  movementBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.42)",
+    paddingHorizontal: 14,
+    paddingBottom: Platform.OS === "ios" ? 22 : 14,
+  },
+  movementBackdropTouch: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+  movementSheet: {
+    width: "100%",
+    maxWidth: 460,
+    maxHeight: "92%",
+    zIndex: 1,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: theme.glassBorder,
+    backgroundColor: "rgba(13, 17, 23, 0.98)",
+    padding: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.38,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 16 },
+  },
+  movementHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 4,
+    paddingBottom: 12,
+  },
+  movementHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  movementTitle: {
+    color: theme.text,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  movementSubtitle: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  movementClose: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: theme.borderStrong,
+    backgroundColor: theme.cardElevated,
+  },
+  movementClosePressed: {
+    backgroundColor: "rgba(240, 246, 252, 0.12)",
+    transform: [{ scale: 0.96 }],
+  },
+  movementCloseText: {
+    color: theme.text,
+    fontSize: 28,
+    lineHeight: 30,
+    fontWeight: "700",
   },
   appInfoBackdrop: {
     flex: 1,

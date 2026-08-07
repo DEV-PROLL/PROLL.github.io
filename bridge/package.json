@@ -9,6 +9,7 @@
     "build": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "start": "node dist/index.js",
+    "test": "npm run build && node --test test/*.test.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -18,7 +19,7 @@
     "mineflayer": "^4.37.1",
     "prismarine-auth": "^3.1.1",
     "prismarine-chat": "^1.10.1",
-    "ws": "^8.18.0"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^20.12.0",

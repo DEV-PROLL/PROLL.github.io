@@ -125,6 +125,14 @@ export class MovementRateGate {
   }
 }
 
+export function isMovementAllowed(
+  userId: string | null | undefined,
+  allowedIgns: readonly string[],
+): boolean {
+  const normalized = userId?.trim().toLowerCase();
+  return normalized ? allowedIgns.includes(normalized) : false;
+}
+
 const MOVEMENT_CONTROL_SET: ReadonlySet<string> = new Set(MOVEMENT_CONTROLS);
 
 export function parseMovementControlMessage(value: unknown): MovementControlParseResult {

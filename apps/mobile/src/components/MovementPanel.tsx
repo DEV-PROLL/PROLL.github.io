@@ -31,10 +31,10 @@ interface ControlButton {
 }
 
 const CONTROLS: readonly ControlButton[] = [
-  { control: "forward", label: "W", hint: "앞" },
-  { control: "left", label: "A", hint: "왼쪽" },
-  { control: "back", label: "S", hint: "뒤" },
-  { control: "right", label: "D", hint: "오른쪽" },
+  { control: "forward", label: "↑", hint: "앞" },
+  { control: "left", label: "←", hint: "왼쪽" },
+  { control: "back", label: "↓", hint: "뒤" },
+  { control: "right", label: "→", hint: "오른쪽" },
   { control: "jump", label: "JUMP", hint: "점프" },
   { control: "sneak", label: "SNEAK", hint: "웅크리기" },
 ];
@@ -175,7 +175,33 @@ export function MovementPanel({
       </View>
 
       <View style={styles.controls}>
-        {CONTROLS.map(({ control, label, hint }) => {
+        <View style={styles.dpad}>
+          <View style={styles.dpadRow}>
+            <View style={styles.controlSpacer} />
+            {renderControl(CONTROLS[0])}
+            <View style={styles.controlSpacer} />
+          </View>
+          <View style={styles.dpadRow}>
+            {CONTROLS.slice(1, 4).map(renderControl)}
+          </View>
+        </View>
+        <View style={styles.actionControls}>
+          {CONTROLS.slice(4).map(renderControl)}
+        </View>
+      </View>
+
+      <Pressable
+        accessibilityLabel="이 기기의 모든 이동 즉시 정지"
+        accessibilityRole="button"
+        onPress={stopAll}
+        style={({ pressed }) => [styles.stop, pressed && styles.stopPressed]}
+      >
+        <Text style={styles.stopText}>즉시 정지</Text>
+      </Pressable>
+    </View>
+  );
+
+  function renderControl({ control, label, hint }: ControlButton) {
           const active = activeControls.has(control);
           return (
             <Pressable
@@ -189,7 +215,7 @@ export function MovementPanel({
                 styles.control,
                 active || pressed ? styles.controlPressed : null,
                 !connected ? styles.controlDisabled : null,
-                control === "jump" || control === "sneak" ? styles.controlWide : null,
+                control === "jump" || control === "sneak" ? styles.actionControl : null,
               ]}
             >
               <Text style={[styles.controlLabel, active && styles.controlLabelPressed]}>
@@ -198,19 +224,7 @@ export function MovementPanel({
               <Text style={styles.controlHint}>{hint}</Text>
             </Pressable>
           );
-        })}
-      </View>
-
-      <Pressable
-        accessibilityLabel="이 기기의 모든 이동 즉시 정지"
-        accessibilityRole="button"
-        onPress={stopAll}
-        style={({ pressed }) => [styles.stop, pressed && styles.stopPressed]}
-      >
-        <Text style={styles.stopText}>EMERGENCY STOP</Text>
-      </Pressable>
-    </View>
-  );
+  }
 }
 
 function formatCoordinates(position: PlayerPosition | null): string {
@@ -224,4 +238,3 @@ function formatPositionMeta(position: PlayerPosition | null): string {
     position.grounded == null ? "--" : position.grounded ? "GROUND" : "AIR";
   return `${position.direction} ${position.yaw.toFixed(0)}° · ${position.dimension ?? "--"} · ${grounded}`;
 }
-

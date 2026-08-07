@@ -209,4 +209,5 @@ export interface BridgeConfig {
   maxSessions: number;
   chatRateLimit: number;
   sessionGraceMs: number;
+  movementAllowedIgns: string[];
 }
