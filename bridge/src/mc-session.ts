@@ -188,6 +188,10 @@ export class McSession extends EventEmitter {
     bot.on("experience", () => {
       this.emitPlayerState();
     });
+    bot.on("physicsTick", () => {
+      const active = this.movementLeases.activeControls();
+      if (active.size > 0) this.writeMovementInput(bot, active);
+    });
 
     const emitBossBarsSoon = (bar?: { entityUUID?: string }) => {
       if (typeof bar?.entityUUID === "string") {
@@ -887,11 +891,17 @@ export class McSession extends EventEmitter {
     for (const control of MOVEMENT_CONTROLS) {
       if (active.has(control)) bot.setControlState(control, true);
     }
-    if (bot.supportFeature("newPlayerInputPacket")) {
-      bot._client.write("player_input", {
-        inputs: toPlayerInputFlags(active),
-      });
-    }
+    this.writeMovementInput(bot, active);
+  }
+
+  private writeMovementInput(
+    bot: Bot,
+    controls: ReadonlySet<MovementControl>,
+  ): void {
+    if (!bot.supportFeature("newPlayerInputPacket")) return;
+    bot._client.write("player_input", {
+      inputs: toPlayerInputFlags(controls),
+    });
   }
 
   private armMovementWatchdog(): void {
