@@ -25,6 +25,16 @@ export interface ManagedSessionSummary {
   playersOnline?: number;
   movementActive: boolean;
   movementClients: number;
+  movementControls: string[];
+  physicsEnabled: boolean;
+  blockLoaded: boolean;
+  position?: {
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+    grounded?: boolean;
+  };
   createdAt: number;
   lastAttachedAt: number;
   closing: boolean;
@@ -189,6 +199,8 @@ export class SessionManager {
       max: this.cfg.maxSessions,
       sessions: sessionEntries.map(([sessionId, entry]) => {
         const session = entry.session.summary();
+        const position = entry.session.positionSnapshot();
+        const movement = entry.session.movementDiagnostics();
         return {
           sessionId,
           userId: entry.userId,
@@ -202,6 +214,18 @@ export class SessionManager {
           playersOnline: session.playersOnline,
           movementActive: entry.session.isMovementActive(),
           movementClients: entry.session.movementClientCount(),
+          movementControls: movement.controls,
+          physicsEnabled: movement.physicsEnabled,
+          blockLoaded: movement.blockLoaded,
+          position: position
+            ? {
+                x: position.x,
+                y: position.y,
+                z: position.z,
+                yaw: position.yaw,
+                grounded: position.grounded,
+              }
+            : undefined,
           createdAt: entry.createdAt,
           lastAttachedAt: entry.lastAttachedAt,
           closing: Boolean(entry.graceTimer),

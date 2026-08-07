@@ -519,6 +519,20 @@ export class McSession extends EventEmitter {
     return this.movementLeases.activeClientCount();
   }
 
+  movementDiagnostics(): {
+    controls: MovementControl[];
+    physicsEnabled: boolean;
+    blockLoaded: boolean;
+  } {
+    const bot = this.bot;
+    const position = bot?.entity?.position;
+    return {
+      controls: [...this.movementLeases.activeControls()],
+      physicsEnabled: bot?.physicsEnabled === true,
+      blockLoaded: Boolean(bot && position && bot.blockAt(position, false)),
+    };
+  }
+
   // Push a message to listeners and store it in the per-user history ring.
   private emitMsg(msg: ServerMessage): void {
     if (msg.type === "chat" || msg.type === "system") {
