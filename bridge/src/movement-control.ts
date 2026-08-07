@@ -9,6 +9,16 @@ export const MOVEMENT_CONTROLS = [
 
 export type MovementControl = (typeof MOVEMENT_CONTROLS)[number];
 
+export interface PlayerInputFlags {
+  forward: boolean;
+  backward: boolean;
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+  shift: boolean;
+  sprint: boolean;
+}
+
 export const MOVEMENT_HOLD_MIN_MS = 250;
 export const MOVEMENT_HOLD_DEFAULT_MS = 1_250;
 export const MOVEMENT_HOLD_MAX_MS = 2_000;
@@ -123,6 +133,20 @@ export class MovementRateGate {
   clear(clientId: string): void {
     this.clients.delete(clientId);
   }
+}
+
+export function toPlayerInputFlags(
+  controls: ReadonlySet<MovementControl>,
+): PlayerInputFlags {
+  return {
+    forward: controls.has("forward"),
+    backward: controls.has("back"),
+    left: controls.has("left"),
+    right: controls.has("right"),
+    jump: controls.has("jump"),
+    shift: controls.has("sneak"),
+    sprint: false,
+  };
 }
 
 export function isMovementAllowed(

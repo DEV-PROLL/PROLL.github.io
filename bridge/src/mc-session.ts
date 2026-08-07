@@ -23,6 +23,7 @@ import {
 import {
   MOVEMENT_CONTROLS,
   MovementLeaseBook,
+  toPlayerInputFlags,
   type MovementControl,
 } from "./movement-control";
 import { headingFromMineflayerYaw } from "./position-direction";
@@ -885,6 +886,11 @@ export class McSession extends EventEmitter {
     bot.physicsEnabled = true;
     for (const control of MOVEMENT_CONTROLS) {
       if (active.has(control)) bot.setControlState(control, true);
+    }
+    if (bot.supportFeature("newPlayerInputPacket")) {
+      bot._client.write("player_input", {
+        inputs: toPlayerInputFlags(active),
+      });
     }
   }
 

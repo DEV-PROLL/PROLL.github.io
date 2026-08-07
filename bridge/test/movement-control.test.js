@@ -7,6 +7,7 @@ const {
   MovementRateGate,
   isMovementAllowed,
   parseMovementControlMessage,
+  toPlayerInputFlags,
 } = require("../dist/movement-control.js");
 const {
   headingFromMineflayerYaw,
@@ -117,6 +118,32 @@ test("movement authorization is fail-closed and case-insensitive", () => {
   assert.equal(isMovementAllowed(null, ["vmfhf"]), false);
   assert.equal(isMovementAllowed("VMFHF", ["vmfhf"]), true);
   assert.equal(isMovementAllowed("other", ["vmfhf"]), false);
+});
+
+test("maps every movement control to the modern player_input packet", () => {
+  assert.deepEqual(
+    toPlayerInputFlags(
+      new Set(["forward", "back", "left", "right", "jump", "sneak"]),
+    ),
+    {
+      forward: true,
+      backward: true,
+      left: true,
+      right: true,
+      jump: true,
+      shift: true,
+      sprint: false,
+    },
+  );
+  assert.deepEqual(toPlayerInputFlags(new Set()), {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+    jump: false,
+    shift: false,
+    sprint: false,
+  });
 });
 
 test("maps Mineflayer yaw from north through its right-handed rotation", () => {
