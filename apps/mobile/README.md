@@ -45,6 +45,10 @@ EXPO_PUBLIC_BRIDGE_URL="wss://bridge.proit.kr" npm run web:export
 내부 프로토콜은 `serverId`를 같이 보내므로, 운영자가 브릿지 `SERVER_PROFILES`와
 앱 UI를 확장하면 나중에 다른 서버도 같은 구조로 붙일 수 있다.
 
+GUI 아이템 텍스처 미러를 바꾸려면 `/data/<버전>/items`와 `/blocks`의 상위 경로를
+`EXPO_PUBLIC_MINECRAFT_ASSETS_BASE_URL`로 지정한다. 기본값은
+`https://raw.githubusercontent.com/PrismarineJS/minecraft-assets/master`다.
+
 PWA는 WebSocket을 열기 전에 `https://bridge.proit.kr/client-ticket`에서 짧은 수명의 1회용 티켓을 받아 `wss://bridge.proit.kr?ticket=...`로 접속한다. 그래서 웹 번들 안에 장기 `BRIDGE_TOKEN`을 넣지 않는다.
 
 `npm run web:export` 후 준비 스크립트는 GitHub Pages 호환을 위해 `.nojekyll`을 만들고, Expo JS 번들을 루트 `app.js?v=<bundle-hash>`로 복사한다. 배포 직후 오래된 화면이 계속 보이면 Safari/Chrome 새로고침, 홈 화면 앱 재추가, 또는 브라우저 사이트 데이터 삭제를 확인한다.

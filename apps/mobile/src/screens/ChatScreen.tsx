@@ -29,6 +29,7 @@ import type {
 } from "../protocol";
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
+import { MinecraftItemIcon } from "../components/MinecraftItemIcon";
 
 interface Props {
   bridgeUrl: string;
@@ -897,6 +898,7 @@ export function ChatScreen({
         {activeWindow ? (
           <GuiWindowModal
             gui={activeWindow}
+            mcVersion={mcVersion}
             selectedSlotIndex={selectedWindowSlot}
             previewSlotIndex={previewWindowSlot}
             pendingSlot={pendingSlot}
@@ -1410,6 +1412,7 @@ function disconnectCopy(
 
 function GuiWindowModal({
   gui,
+  mcVersion,
   selectedSlotIndex,
   previewSlotIndex,
   pendingSlot,
@@ -1419,6 +1422,7 @@ function GuiWindowModal({
   onClickSelected,
 }: {
   gui: GuiWindow;
+  mcVersion: string;
   selectedSlotIndex: number | null;
   previewSlotIndex: number | null;
   pendingSlot: number | null;
@@ -1467,17 +1471,30 @@ function GuiWindowModal({
                 contentContainerStyle={styles.guiDetailScrollContent}
                 nestedScrollEnabled
               >
-                <RichText
-                  text={itemLabel(detailItem)}
-                  segments={detailItem.displayNameSegments}
-                  style={styles.guiDetailName}
-                  onSegmentClick={noopSegmentHandler}
-                  onSegmentHover={noopSegmentHandler}
-                />
-                <Text style={styles.guiDetailMeta} numberOfLines={1}>
-                  슬롯 {detailSlot?.index ?? "-"} · {detailItem.name}
-                  {selectedSlot?.index === detailSlot?.index ? " · 실행 대상" : ""}
-                </Text>
+                <View style={styles.guiDetailTopRow}>
+                  <MinecraftItemIcon
+                    key={`${mcVersion}-${detailItem.name}`}
+                    itemName={detailItem.name}
+                    mcVersion={mcVersion}
+                    fallbackLabel={shortItemLabel(detailItem)}
+                    fallbackColor={itemColor(detailItem.name)}
+                    size={44}
+                    style={styles.guiDetailIcon}
+                  />
+                  <View style={styles.guiDetailCopy}>
+                    <RichText
+                      text={itemLabel(detailItem)}
+                      segments={detailItem.displayNameSegments}
+                      style={styles.guiDetailName}
+                      onSegmentClick={noopSegmentHandler}
+                      onSegmentHover={noopSegmentHandler}
+                    />
+                    <Text style={styles.guiDetailMeta} numberOfLines={1}>
+                      슬롯 {detailSlot?.index ?? "-"} · {detailItem.name}
+                      {selectedSlot?.index === detailSlot?.index ? " · 실행 대상" : ""}
+                    </Text>
+                  </View>
+                </View>
                 {detailItem.lore?.length ? (
                   <View style={styles.guiLoreList}>
                     {detailItem.lore.map((line, index) => (
@@ -1512,6 +1529,7 @@ function GuiWindowModal({
             renderItem={({ item }) => (
               <GuiSlotCell
                 slot={item}
+                mcVersion={mcVersion}
                 selected={selectedSlotIndex === item.index}
                 previewed={detailSlot?.index === item.index && selectedSlotIndex !== item.index}
                 pending={pendingSlot === item.index}
@@ -1834,6 +1852,7 @@ function PlayerListModal({
 
 function GuiSlotCell({
   slot,
+  mcVersion,
   selected,
   previewed,
   pending,
@@ -1841,6 +1860,7 @@ function GuiSlotCell({
   onSelect,
 }: {
   slot: GuiSlot;
+  mcVersion: string;
   selected: boolean;
   previewed: boolean;
   pending: boolean;
@@ -1867,11 +1887,14 @@ function GuiSlotCell({
     >
       {item ? (
         <>
-          <View style={[styles.guiItemIcon, { backgroundColor: itemColor(item.name) }]}>
-            <Text style={styles.guiItemIconText} numberOfLines={1}>
-              {label}
-            </Text>
-          </View>
+          <MinecraftItemIcon
+            key={`${mcVersion}-${item.name}`}
+            itemName={item.name}
+            mcVersion={mcVersion}
+            fallbackLabel={label}
+            fallbackColor={itemColor(item.name)}
+            size={24}
+          />
           {item.count > 1 ? (
             <Text style={styles.guiItemCount}>{item.count}</Text>
           ) : null}
@@ -2541,18 +2564,6 @@ const styles = StyleSheet.create({
     borderColor: theme.accentSoft,
     backgroundColor: "rgba(126, 231, 135, 0.15)",
   },
-  guiItemIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  guiItemIconText: {
-    color: "#ffffff",
-    fontSize: 10,
-    fontWeight: "900",
-  },
   guiItemCount: {
     position: "absolute",
     right: 3,
@@ -2585,6 +2596,19 @@ const styles = StyleSheet.create({
   guiDetailScrollContent: {
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  guiDetailTopRow: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  guiDetailIcon: {
+    marginVertical: 1,
+  },
+  guiDetailCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   guiDetailEmpty: {
     paddingHorizontal: 12,
