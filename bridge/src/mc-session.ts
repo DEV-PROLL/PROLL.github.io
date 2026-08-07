@@ -898,6 +898,11 @@ export class McSession extends EventEmitter {
     const active = this.movementLeases.activeControls();
     bot.clearControlStates();
     if (active.size === 0) {
+      // Modern servers retain the last player_input flags until the client
+      // explicitly sends a neutral packet. Send it before pausing physics so
+      // release, lease expiry, disconnect, and shutdown cannot leave stale
+      // movement active server-side.
+      this.writeMovementInput(bot, active);
       bot.physicsEnabled = false;
       return;
     }
@@ -913,9 +918,14 @@ export class McSession extends EventEmitter {
     controls: ReadonlySet<MovementControl>,
   ): void {
     if (!bot.supportFeature("newPlayerInputPacket")) return;
-    bot._client.write("player_input", {
-      inputs: toPlayerInputFlags(controls),
-    });
+    try {
+      bot._client.write("player_input", {
+        inputs: toPlayerInputFlags(controls),
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`[mc-session] failed to write player_input reason=${reason}`);
+    }
   }
 
   private armMovementWatchdog(): void {

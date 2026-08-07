@@ -12,6 +12,58 @@ const {
 const {
   headingFromMineflayerYaw,
 } = require("../dist/position-direction.js");
+const { McSession } = require("../dist/mc-session.js");
+
+function movementSession() {
+  const writes = [];
+  const controls = new Map();
+  const bot = {
+    _client: {
+      write(name, params) {
+        writes.push({ name, params });
+      },
+    },
+    physicsEnabled: false,
+    supportFeature(feature) {
+      return feature === "newPlayerInputPacket";
+    },
+    clearControlStates() {
+      controls.clear();
+    },
+    setControlState(control, active) {
+      if (active) controls.set(control, true);
+      else controls.delete(control);
+    },
+    getControlState(control) {
+      return controls.get(control) === true;
+    },
+    quit() {},
+  };
+  const session = new McSession({
+    host: "example.invalid",
+    port: 25565,
+    version: "1.21.11",
+    username: "tester",
+    profilesFolder: "/tmp/proll-test-auth",
+  });
+  session.bot = bot;
+  session.connected = true;
+  return { session, bot, writes };
+}
+
+function lastPlayerInput(writes) {
+  return writes.filter(({ name }) => name === "player_input").at(-1)?.params?.inputs;
+}
+
+const NEUTRAL_INPUT = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false,
+  jump: false,
+  shift: false,
+  sprint: false,
+};
 
 test("expires a held control when its lease becomes stale", () => {
   // Given
@@ -144,6 +196,51 @@ test("maps every movement control to the modern player_input packet", () => {
     shift: false,
     sprint: false,
   });
+});
+
+test("writes a neutral modern input packet when a control is released", () => {
+  const { session, bot, writes } = movementSession();
+
+  session.setMovementControl("phone", "forward", true, 1_000);
+  assert.equal(lastPlayerInput(writes).forward, true);
+  assert.equal(bot.physicsEnabled, true);
+
+  session.setMovementControl("phone", "forward", false, 0);
+  assert.deepEqual(lastPlayerInput(writes), NEUTRAL_INPUT);
+  assert.equal(bot.physicsEnabled, false);
+  session.shutdown("test complete");
+});
+
+test("writes a neutral modern input packet when a client detaches", () => {
+  const { session, bot, writes } = movementSession();
+
+  session.setMovementControl("phone", "left", true, 1_000);
+  session.stopMovementForClient("phone");
+
+  assert.deepEqual(lastPlayerInput(writes), NEUTRAL_INPUT);
+  assert.equal(bot.physicsEnabled, false);
+  session.shutdown("test complete");
+});
+
+test("writes a neutral modern input packet when the lease expires", async () => {
+  const { session, bot, writes } = movementSession();
+
+  session.setMovementControl("phone", "jump", true, 250);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  assert.deepEqual(lastPlayerInput(writes), NEUTRAL_INPUT);
+  assert.equal(bot.physicsEnabled, false);
+  session.shutdown("test complete");
+});
+
+test("writes a neutral modern input packet during shutdown", () => {
+  const { session, bot, writes } = movementSession();
+
+  session.setMovementControl("phone", "right", true, 1_000);
+  session.shutdown("test complete");
+
+  assert.deepEqual(lastPlayerInput(writes), NEUTRAL_INPUT);
+  assert.equal(bot.physicsEnabled, false);
 });
 
 test("maps Mineflayer yaw from north through its right-handed rotation", () => {
