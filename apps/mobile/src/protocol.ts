@@ -1,5 +1,13 @@
 // Wire protocol shared with the bridge. Keep in sync with bridge/src/types.ts.
 
+export type MovementControl =
+  | "forward"
+  | "back"
+  | "left"
+  | "right"
+  | "jump"
+  | "sneak";
+
 export type ClientMessage =
   | { type: "auth_start"; mcVersion?: string; serverId?: string; loginRequestId?: string }
   | { type: "auth_cached"; userId: string; mcVersion?: string; serverId?: string }
@@ -7,6 +15,13 @@ export type ClientMessage =
   | { type: "complete"; requestId: string; text: string }
   | { type: "window_click"; slot: number; mouseButton?: 0 | 1 }
   | { type: "window_close" }
+  | {
+      type: "movement_control";
+      control: MovementControl;
+      pressed: boolean;
+      holdMs?: number;
+    }
+  | { type: "movement_stop_all" }
   | { type: "forget_account"; userId: string }
   | { type: "logout" }
   | { type: "ping" };
@@ -91,10 +106,8 @@ export type ServerMessage =
       xpProgress?: number;
       ts: number;
     }
-  | {
-      type: "window_open" | "window_update";
-      window: GuiWindow;
-    }
+  | ({ type: "position" } & PlayerPosition)
+  | { type: "window_open" | "window_update"; window: GuiWindow }
   | { type: "window_close"; windowId?: number }
   | { type: "kicked"; reason: string }
   | { type: "error"; text: string }
@@ -133,6 +146,17 @@ export interface BossBarSummary {
   health: number;
   color: string;
   dividers?: number;
+}
+
+export interface PlayerPosition {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  direction: "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
+  dimension?: string;
+  grounded?: boolean;
+  ts: number;
 }
 
 export interface GuiWindow {

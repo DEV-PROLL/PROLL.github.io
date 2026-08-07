@@ -2,11 +2,13 @@ import http from "http";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { randomUUID } from "crypto";
 import { ping, type NewPingResult, type OldPingResult } from "minecraft-protocol";
+import { monitorEventLoopDelay, type IntervalHistogram } from "perf_hooks";
 import type { BridgeConfig, BridgeServerProfile, ClientMessage, ServerMessage } from "./types";
 import { AuthService, type AuthResult, type DeviceCode } from "./auth";
 import type { McSession } from "./mc-session";
 import type { SessionManager } from "./session-manager";
 import { assertSupportedMcVersion } from "./mc-versions";
+import { MovementRateGate, parseMovementControlMessage } from "./movement-control";
 
 const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 const PENDING_LOGIN_TTL_MS = 20 * 60 * 1000;
@@ -100,6 +102,8 @@ interface RuntimeStats {
   sessionReuses: number;
   graceReconnects: number;
   kicked: number;
+  movementRateLimited: number;
+  eventLoopDelay: IntervalHistogram;
   recentKicks: RecentIssue[];
   recentErrors: RecentIssue[];
   memorySamples: MemorySample[];
@@ -130,6 +134,8 @@ export function startWsServer(
   auth: AuthService,
   sessions: SessionManager,
 ): http.Server {
+  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+  eventLoopDelay.enable();
   const statusCaches = new Map<string, StatusCache>();
   const stats: RuntimeStats = {
     startedAt: Date.now(),
@@ -160,6 +166,8 @@ export function startWsServer(
     sessionReuses: 0,
     graceReconnects: 0,
     kicked: 0,
+    movementRateLimited: 0,
+    eventLoopDelay,
     recentKicks: [],
     recentErrors: [],
     memorySamples: [],
@@ -168,6 +176,7 @@ export function startWsServer(
   const pendingLogins = new Map<string, PendingLogin>();
   const clientTickets = new Map<string, ClientTicket>();
   const rateLimits = new Map<string, RateLimitBucket>();
+  const movementRateGate = new MovementRateGate();
 
   const httpServer = http.createServer((req, res) => {
     void handleHttpRequest(
@@ -259,12 +268,24 @@ export function startWsServer(
         return;
       }
       recordEvent(stats, "ws_message", parsed.type);
-      handleMessage(parsed, state, send, cfg, auth, sessions, pendingLogins, stats).catch((err) => {
+      handleMessage(
+        parsed,
+        state,
+        send,
+        cfg,
+        auth,
+        sessions,
+        pendingLogins,
+        stats,
+        movementRateGate,
+      ).catch((err) => {
         send({ type: "error", text: err?.message ?? String(err) });
       });
     });
 
     ws.on("close", () => {
+      state.mcSession?.stopMovementForClient(state.sessionKey);
+      movementRateGate.clear(state.sessionKey);
       stats.activeWs = Math.max(0, stats.activeWs - 1);
       if (state.authenticatedUserId) {
         stats.authenticatedWsCloses += 1;
@@ -280,6 +301,8 @@ export function startWsServer(
 
     ws.on("error", () => {
       // Mirror close cleanup; ws will fire 'close' too but be defensive.
+      state.mcSession?.stopMovementForClient(state.sessionKey);
+      movementRateGate.clear(state.sessionKey);
       if (state.sessionId && state.listener) {
         sessions.detach(state.sessionId, state.listener);
         state.listener = null;
@@ -290,6 +313,7 @@ export function startWsServer(
   httpServer.listen(cfg.wsPort, cfg.bindHost, () => {
     console.log(`[bridge] WS+HTTP listening on ${cfg.bindHost}:${cfg.wsPort}`);
   });
+  httpServer.once("close", () => eventLoopDelay.disable());
 
   return httpServer;
 }
@@ -776,6 +800,8 @@ function buildAdminStatus(
       rssMb: Math.round(mem.rss / 1024 / 1024),
       heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
       heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+      eventLoopDelayMeanMs: finiteMetric(stats.eventLoopDelay.mean / 1e6),
+      eventLoopDelayP99Ms: finiteMetric(stats.eventLoopDelay.percentile(99) / 1e6),
     },
     websocket: {
       active: stats.activeWs,
@@ -816,6 +842,7 @@ function buildAdminStatus(
       sessionReuses: stats.sessionReuses,
       graceReconnects: stats.graceReconnects,
       kicked: stats.kicked,
+      movementRateLimited: stats.movementRateLimited,
     },
     sessions: sessionStats,
     memory: {
@@ -1135,6 +1162,7 @@ async function handleMessage(
   sessions: SessionManager,
   pendingLogins: Map<string, PendingLogin>,
   stats: RuntimeStats,
+  movementRateGate: MovementRateGate,
 ): Promise<void> {
   switch (msg.type) {
     case "ping":
@@ -1258,6 +1286,39 @@ async function handleMessage(
       return;
     }
 
+    case "movement_control": {
+      if (!state.mcSession) {
+        send({ type: "error", text: "not authenticated" });
+        return;
+      }
+      const parsed = parseMovementControlMessage(msg);
+      if (!parsed.ok) {
+        stats.messagesRejected += 1;
+        send({ type: "error", text: parsed.reason });
+        return;
+      }
+      if (parsed.value.pressed && !movementRateGate.allow(state.sessionKey, Date.now())) {
+        stats.messagesRejected += 1;
+        stats.movementRateLimited += 1;
+        send({ type: "error", text: "movement rate limited" });
+        return;
+      }
+      const { control, pressed, holdMs } = parsed.value;
+      const result = state.mcSession.setMovementControl(
+        state.sessionKey,
+        control,
+        pressed,
+        holdMs,
+      );
+      if (!result.ok) send({ type: "error", text: result.reason });
+      return;
+    }
+
+    case "movement_stop_all": {
+      state.mcSession?.stopMovementForClient(state.sessionKey);
+      return;
+    }
+
     case "forget_account": {
       const userId = msg.userId.trim();
       if (!userId) {
@@ -1265,6 +1326,7 @@ async function handleMessage(
         return;
       }
       if (state.sessionId && state.listener) {
+        state.mcSession?.stopMovementForClient(state.sessionKey);
         sessions.detach(state.sessionId, state.listener);
         state.listener = null;
         state.mcSession = null;
@@ -1283,6 +1345,7 @@ async function handleMessage(
 
     case "logout": {
       if (state.sessionId && state.listener) {
+        state.mcSession?.stopMovementForClient(state.sessionKey);
         sessions.detach(state.sessionId, state.listener);
         sessions.forceClose(state.sessionId);
         state.listener = null;
@@ -1433,6 +1496,7 @@ function attachToSession(
 
 function detachClientSession(state: ClientState, sessions: SessionManager): void {
   if (!state.sessionId || !state.listener) return;
+  state.mcSession?.stopMovementForClient(state.sessionKey);
   sessions.detach(state.sessionId, state.listener);
   state.listener = null;
   state.mcSession = null;
@@ -1470,4 +1534,8 @@ function resolveServerProfile(
 
 function resolveMcVersion(requested: string | undefined, fallback: string): string {
   return assertSupportedMcVersion(requested?.trim() || fallback);
+}
+
+function finiteMetric(value: number): number {
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
 }

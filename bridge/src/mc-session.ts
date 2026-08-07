@@ -20,13 +20,21 @@ import {
   rawJson,
   richSegments,
 } from "./chat-format";
+import {
+  MOVEMENT_CONTROLS,
+  MovementLeaseBook,
+  type MovementControl,
+} from "./movement-control";
+import { headingFromMineflayerYaw } from "./position-direction";
 
 type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
 type BossBarsMessage = Extract<ServerMessage, { type: "boss_bars" }>;
 type PlayerStateMessage = Extract<ServerMessage, { type: "player_state" }>;
+type PositionMessage = Extract<ServerMessage, { type: "position" }>;
 type SerializedLoreLine = { text: string; segments?: ChatSegment[] };
 
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
+const POSITION_SYNC_MS = 250;
 const debuggedGuiItems = new Set<string>();
 
 export interface McSessionOptions {
@@ -74,7 +82,11 @@ export class McSession extends EventEmitter {
   private lastPlayerListSignature = "";
   private lastBossBarsSignature = "";
   private lastPlayerStateSignature = "";
+  private lastPositionSignature = "";
   private readonly suppressedBossBarIds = new Set<string>();
+  private readonly movementLeases = new MovementLeaseBook();
+  private positionTimer: NodeJS.Timeout | null = null;
+  private movementWatchdogTimer: NodeJS.Timeout | null = null;
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
@@ -145,7 +157,8 @@ export class McSession extends EventEmitter {
     // Chat/command control does not need client-side physics ticks. Keeping
     // them off lowers idle CPU on the Mac mini bridge without affecting chat,
     // tab completion, GUI clicks, or anti-AFK look packets.
-    (bot as unknown as { physicsEnabled?: boolean }).physicsEnabled = false;
+    bot.clearControlStates();
+    bot.physicsEnabled = false;
   }
 
   private wireEvents(bot: Bot): void {
@@ -157,6 +170,7 @@ export class McSession extends EventEmitter {
       this.emitMsg({ type: "auth_ok", userId: ign, ign, uuid });
       this.markConnected();
       this.startPlayerListSync();
+      this.startPositionSync();
       this.startAntiAfk();
     });
 
@@ -464,6 +478,46 @@ export class McSession extends EventEmitter {
     }
   }
 
+  setMovementControl(
+    clientId: string,
+    control: MovementControl,
+    pressed: boolean,
+    holdMs: number,
+  ): { ok: true } | { ok: false; reason: string } {
+    const bot = this.bot;
+    if (pressed && (!bot || !this.connected)) {
+      return { ok: false, reason: "not connected" };
+    }
+    if (pressed) {
+      this.movementLeases.press(clientId, control, holdMs, Date.now());
+    } else {
+      this.movementLeases.release(clientId, control);
+    }
+    this.syncMovementControls();
+    this.armMovementWatchdog();
+    return { ok: true };
+  }
+
+  stopMovementForClient(clientId: string): void {
+    if (!this.movementLeases.stopClient(clientId)) return;
+    this.syncMovementControls();
+    this.armMovementWatchdog();
+  }
+
+  private stopAllMovement(): void {
+    this.movementLeases.stopAll();
+    this.syncMovementControls();
+    this.stopMovementWatchdog();
+  }
+
+  isMovementActive(): boolean {
+    return this.movementLeases.isActive();
+  }
+
+  movementClientCount(): number {
+    return this.movementLeases.activeClientCount();
+  }
+
   // Push a message to listeners and store it in the per-user history ring.
   private emitMsg(msg: ServerMessage): void {
     if (msg.type === "chat" || msg.type === "system") {
@@ -537,12 +591,15 @@ export class McSession extends EventEmitter {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     this.stopAntiAfk();
+    this.stopAllMovement();
+    this.stopPositionSync();
     this.clearConfigurationRestartWatchdog();
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
     this.stopPlayerListSync();
     this.lastBossBarsSignature = "";
     this.lastPlayerStateSignature = "";
+    this.lastPositionSignature = "";
     this.suppressedBossBarIds.clear();
     const bot = this.bot;
     this.bot = null;
@@ -561,12 +618,15 @@ export class McSession extends EventEmitter {
     const normalizedReason = reason || "ended";
     console.warn(`[mc-session] ended reason=${normalizedReason}`);
     this.stopAntiAfk();
+    this.stopAllMovement();
+    this.stopPositionSync();
     this.clearConfigurationRestartWatchdog();
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
     this.stopPlayerListSync();
     this.lastBossBarsSignature = "";
     this.lastPlayerStateSignature = "";
+    this.lastPositionSignature = "";
     this.suppressedBossBarIds.clear();
     this.connected = false;
     const bot = this.bot;
@@ -626,6 +686,7 @@ export class McSession extends EventEmitter {
     this.emitPlayerList();
     this.emitBossBars();
     this.emitPlayerState(true);
+    this.emitPosition(true);
   }
 
   private startPlayerListSync(): void {
@@ -742,6 +803,92 @@ export class McSession extends EventEmitter {
       xpProgress: clamp01(xpProgress ?? 0),
       ts: Date.now(),
     };
+  }
+
+  positionSnapshot(): PositionMessage | null {
+    const bot = this.bot;
+    if (!bot || !this.connected || !bot.entity) return null;
+    const { position, yaw, onGround } = bot.entity;
+    if (
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z) ||
+      !Number.isFinite(yaw)
+    ) {
+      return null;
+    }
+    const heading = headingFromMineflayerYaw(yaw);
+    return {
+      type: "position",
+      x: position.x,
+      y: position.y,
+      z: position.z,
+      yaw: heading.yaw,
+      direction: heading.direction,
+      dimension: bot.game?.dimension,
+      grounded: typeof onGround === "boolean" ? onGround : undefined,
+      ts: Date.now(),
+    };
+  }
+
+  private startPositionSync(): void {
+    this.stopPositionSync();
+    this.positionTimer = setInterval(() => this.emitPosition(), POSITION_SYNC_MS);
+  }
+
+  private stopPositionSync(): void {
+    if (this.positionTimer) clearInterval(this.positionTimer);
+    this.positionTimer = null;
+    this.lastPositionSignature = "";
+  }
+
+  private emitPosition(force = false): void {
+    const msg = this.positionSnapshot();
+    if (!msg) return;
+    const signature = [
+      msg.x.toFixed(3),
+      msg.y.toFixed(3),
+      msg.z.toFixed(3),
+      msg.yaw.toFixed(1),
+      msg.dimension ?? "",
+      msg.grounded ?? "",
+    ].join(":");
+    if (!force && signature === this.lastPositionSignature) return;
+    this.lastPositionSignature = signature;
+    this.emitMsg(msg);
+  }
+
+  private syncMovementControls(): void {
+    const bot = this.bot;
+    if (!bot) return;
+    const active = this.movementLeases.activeControls();
+    bot.clearControlStates();
+    if (active.size === 0) {
+      bot.physicsEnabled = false;
+      return;
+    }
+    bot.physicsEnabled = true;
+    for (const control of MOVEMENT_CONTROLS) {
+      if (active.has(control)) bot.setControlState(control, true);
+    }
+  }
+
+  private armMovementWatchdog(): void {
+    this.stopMovementWatchdog();
+    const expiresAt = this.movementLeases.nextExpiryAt();
+    if (expiresAt == null) return;
+    this.movementWatchdogTimer = setTimeout(() => {
+      this.movementWatchdogTimer = null;
+      if (this.movementLeases.expire(Date.now())) {
+        this.syncMovementControls();
+      }
+      this.armMovementWatchdog();
+    }, Math.max(0, expiresAt - Date.now()));
+  }
+
+  private stopMovementWatchdog(): void {
+    if (this.movementWatchdogTimer) clearTimeout(this.movementWatchdogTimer);
+    this.movementWatchdogTimer = null;
   }
 
   private currentBossBars(filterSuppressed = true): BossBarSummary[] {

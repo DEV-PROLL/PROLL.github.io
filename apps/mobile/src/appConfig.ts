@@ -4,6 +4,17 @@ export const DEFAULT_SERVER_ADDRESS = "99999.kr";
 export const DEFAULT_SERVER_ID = "ludulgi";
 export const DEFAULT_SERVER_LABEL = "루둘기";
 
+const movementFeature =
+  typeof process !== "undefined"
+    ? process.env.EXPO_PUBLIC_MOVEMENT_ENABLED?.trim().toLowerCase()
+    : undefined;
+
+export const MOVEMENT_PANEL_ENABLED =
+  movementFeature === "1" ||
+  movementFeature === "true" ||
+  // Initial private rollout cohort requested by the movement coordinator.
+  movementFeature === "_pelol";
+
 export function normalizeServerId(value: string | null | undefined): string {
   const trimmed = value?.trim().toLowerCase();
   if (!trimmed || trimmed === "rudulgi") return DEFAULT_SERVER_ID;

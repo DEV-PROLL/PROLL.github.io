@@ -23,6 +23,8 @@ export interface ManagedSessionSummary {
   connected: boolean;
   ign?: string;
   playersOnline?: number;
+  movementActive: boolean;
+  movementClients: number;
   createdAt: number;
   lastAttachedAt: number;
   closing: boolean;
@@ -31,6 +33,7 @@ export interface ManagedSessionSummary {
 
 export interface SessionManagerStats {
   active: number;
+  movementActive: number;
   max: number;
   sessions: ManagedSessionSummary[];
 }
@@ -118,6 +121,8 @@ export class SessionManager {
     if (bossBars) onMessage(bossBars);
     const playerState = entry.session.playerStateSnapshot();
     if (playerState) onMessage(playerState);
+    const position = entry.session.positionSnapshot();
+    if (position) onMessage(position);
     entry.session.on("message", onMessage);
     return {
       sessionId,
@@ -177,10 +182,12 @@ export class SessionManager {
   }
 
   stats(): SessionManagerStats {
+    const sessionEntries = [...this.sessions.entries()];
     return {
       active: this.sessions.size,
+      movementActive: sessionEntries.filter(([, entry]) => entry.session.isMovementActive()).length,
       max: this.cfg.maxSessions,
-      sessions: [...this.sessions.entries()].map(([sessionId, entry]) => {
+      sessions: sessionEntries.map(([sessionId, entry]) => {
         const session = entry.session.summary();
         return {
           sessionId,
@@ -193,6 +200,8 @@ export class SessionManager {
           connected: session.connected,
           ign: session.ign,
           playersOnline: session.playersOnline,
+          movementActive: entry.session.isMovementActive(),
+          movementClients: entry.session.movementClientCount(),
           createdAt: entry.createdAt,
           lastAttachedAt: entry.lastAttachedAt,
           closing: Boolean(entry.graceTimer),
