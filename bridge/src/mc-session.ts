@@ -127,7 +127,6 @@ export class McSession extends EventEmitter {
       },
     });
     this.bot = bot;
-    this.disableUnusedSimulation(bot);
     this.patchClientSettingsWrite(bot);
     this.wireEvents(bot);
     this.wireProtocolCompat(bot);
@@ -154,6 +153,8 @@ export class McSession extends EventEmitter {
   }
 
   private disableUnusedSimulation(bot: Bot): void {
+    // Mineflayer installs control helpers during plugin initialization, so this
+    // must run from the spawn handler rather than immediately after createBot.
     // Chat/command control does not need client-side physics ticks. Keeping
     // them off lowers idle CPU on the Mac mini bridge without affecting chat,
     // tab completion, GUI clicks, or anti-AFK look packets.
