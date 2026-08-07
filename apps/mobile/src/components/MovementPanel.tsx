@@ -76,6 +76,7 @@ export function MovementPanel({
 
   const release = useCallback(
     (control: MovementControl) => {
+      if (!activeRef.current.has(control)) return;
       clearTimer(control);
       updateActive(control, false);
       sendRef.current({ type: "movement_control", control, pressed: false });
@@ -94,6 +95,7 @@ export function MovementPanel({
   const press = useCallback(
     (control: MovementControl) => {
       if (!enabledRef.current || !connected) return;
+      if (activeRef.current.has(control)) return;
       clearTimer(control);
       const command: ClientMessage = {
         type: "movement_control",
@@ -211,6 +213,9 @@ export function MovementPanel({
               disabled={!connected}
               onPressIn={() => press(control)}
               onPressOut={() => release(control)}
+              onTouchStart={() => press(control)}
+              onTouchEnd={() => release(control)}
+              onTouchCancel={() => release(control)}
               style={({ pressed }) => [
                 styles.control,
                 active || pressed ? styles.controlPressed : null,
