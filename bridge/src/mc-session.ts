@@ -526,15 +526,29 @@ export class McSession extends EventEmitter {
 
   movementDiagnostics(): {
     controls: MovementControl[];
+    botControls: Record<MovementControl, boolean>;
     physicsEnabled: boolean;
     blockLoaded: boolean;
+    gameMode?: string;
+    velocity?: { x: number; y: number; z: number };
   } {
     const bot = this.bot;
     const position = bot?.entity?.position;
+    const velocity = bot?.entity?.velocity;
     return {
       controls: [...this.movementLeases.activeControls()],
+      botControls: Object.fromEntries(
+        MOVEMENT_CONTROLS.map((control) => [
+          control,
+          bot?.getControlState(control) === true,
+        ]),
+      ) as Record<MovementControl, boolean>,
       physicsEnabled: bot?.physicsEnabled === true,
       blockLoaded: Boolean(bot && position && bot.blockAt(position, false)),
+      gameMode: bot?.game?.gameMode,
+      velocity: velocity
+        ? { x: velocity.x, y: velocity.y, z: velocity.z }
+        : undefined,
     };
   }
 

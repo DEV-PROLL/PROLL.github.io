@@ -26,8 +26,11 @@ export interface ManagedSessionSummary {
   movementActive: boolean;
   movementClients: number;
   movementControls: string[];
+  botControls: Record<string, boolean>;
   physicsEnabled: boolean;
   blockLoaded: boolean;
+  gameMode?: string;
+  velocity?: { x: number; y: number; z: number };
   position?: {
     x: number;
     y: number;
@@ -215,8 +218,11 @@ export class SessionManager {
           movementActive: entry.session.isMovementActive(),
           movementClients: entry.session.movementClientCount(),
           movementControls: movement.controls,
+          botControls: movement.botControls,
           physicsEnabled: movement.physicsEnabled,
           blockLoaded: movement.blockLoaded,
+          gameMode: movement.gameMode,
+          velocity: movement.velocity,
           position: position
             ? {
                 x: position.x,
