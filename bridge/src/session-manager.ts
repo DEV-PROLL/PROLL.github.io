@@ -1,9 +1,4 @@
 import { McSession } from "./mc-session";
-import type {
-  MovementDiagnosticEvent,
-  MovementEventDiagnostic,
-  MovementPositionDelta3s,
-} from "./mc-session";
 import type { BridgeConfig, BridgeServerProfile, HeadDiagnostics, ServerMessage } from "./types";
 
 interface ManagedSession {
@@ -28,21 +23,6 @@ export interface ManagedSessionSummary {
   connected: boolean;
   ign?: string;
   playersOnline?: number;
-  movementActive: boolean;
-  movementClients: number;
-  movementControls: string[];
-  botControls: Record<string, boolean>;
-  physicsEnabled: boolean;
-  blockLoaded: boolean;
-  gameMode?: string;
-  velocity?: { x: number; y: number; z: number };
-  movementEpoch: number;
-  teleportEpoch: number;
-  epochEvents: Record<MovementDiagnosticEvent, MovementEventDiagnostic>;
-  lastForcedMoveAt?: number;
-  lastPhysicsTickAt?: number;
-  loadedColumns: number;
-  positionDelta3s?: MovementPositionDelta3s;
   headDiagnostics: HeadDiagnostics;
   position?: {
     x: number;
@@ -59,7 +39,6 @@ export interface ManagedSessionSummary {
 
 export interface SessionManagerStats {
   active: number;
-  movementActive: number;
   max: number;
   sessions: ManagedSessionSummary[];
 }
@@ -209,12 +188,10 @@ export class SessionManager {
     const sessionEntries = [...this.sessions.entries()];
     return {
       active: this.sessions.size,
-      movementActive: sessionEntries.filter(([, entry]) => entry.session.isMovementActive()).length,
       max: this.cfg.maxSessions,
       sessions: sessionEntries.map(([sessionId, entry]) => {
         const session = entry.session.summary();
         const position = entry.session.positionSnapshot();
-        const movement = entry.session.movementDiagnostics();
         return {
           sessionId,
           userId: entry.userId,
@@ -226,21 +203,6 @@ export class SessionManager {
           connected: session.connected,
           ign: session.ign,
           playersOnline: session.playersOnline,
-          movementActive: entry.session.isMovementActive(),
-          movementClients: entry.session.movementClientCount(),
-          movementControls: movement.controls,
-          botControls: movement.botControls,
-          physicsEnabled: movement.physicsEnabled,
-          blockLoaded: movement.blockLoaded,
-          gameMode: movement.gameMode,
-          velocity: movement.velocity,
-          movementEpoch: movement.movementEpoch,
-          teleportEpoch: movement.teleportEpoch,
-          epochEvents: movement.epochEvents,
-          lastForcedMoveAt: movement.lastForcedMoveAt,
-          lastPhysicsTickAt: movement.lastPhysicsTickAt,
-          loadedColumns: movement.loadedColumns,
-          positionDelta3s: movement.positionDelta3s,
           headDiagnostics: entry.session.headDiagnostics(),
           position: position
             ? {

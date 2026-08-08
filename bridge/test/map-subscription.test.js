@@ -36,8 +36,6 @@ class FakeMcSession extends EventEmitter {
     return null;
   }
 
-  stopMovementForClient() {}
-
   stopPositionSubscriptionForClient() {}
 
   startMapSubscriptionForClient(clientId, listener, radius) {
@@ -72,7 +70,7 @@ function bridgeFixture(mapEnabled = true) {
     forceClose() {},
     forceCloseUser() {},
     stats() {
-      return { active: 1, movementActive: 0, max: 4, sessions: [] };
+      return { active: 1, max: 4, sessions: [] };
     },
   };
   const auth = {
@@ -108,7 +106,6 @@ function bridgeFixture(mapEnabled = true) {
     maxSessions: 4,
     chatRateLimit: 5,
     sessionGraceMs: 1_000,
-    movementAllowedIgns: ["tester"],
     headMetadataEnabled: false,
     headDebugEnabled: false,
     mapEnabled,

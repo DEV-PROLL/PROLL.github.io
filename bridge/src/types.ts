@@ -1,10 +1,7 @@
 // Wire protocol between mobile app and bridge.
 // All messages are JSON over a single WebSocket connection.
 
-import type { MovementControl } from "./movement-control";
 import type { CompassDirection } from "./position-direction";
-
-export type { MovementControl } from "./movement-control";
 
 export type ClientMessage =
   | { type: "auth_start"; mcVersion?: string; serverId?: string; loginRequestId?: string }
@@ -13,13 +10,6 @@ export type ClientMessage =
   | { type: "complete"; requestId: string; text: string }
   | { type: "window_click"; slot: number; mouseButton?: 0 | 1 }
   | { type: "window_close" }
-  | {
-      type: "movement_control";
-      control: MovementControl;
-      pressed: boolean;
-      holdMs?: number;
-    }
-  | { type: "movement_stop_all" }
   | { type: "position_subscribe" }
   | { type: "position_unsubscribe" }
   | { type: "map_subscribe"; radius?: number }
@@ -274,7 +264,6 @@ export interface BridgeConfig {
   maxSessions: number;
   chatRateLimit: number;
   sessionGraceMs: number;
-  movementAllowedIgns: string[];
   headMetadataEnabled: boolean;
   headDebugEnabled: boolean;
   mapEnabled: boolean;

@@ -31,12 +31,8 @@ import type {
 import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
 import { MinecraftItemIcon } from "../components/MinecraftItemIcon";
-import { MovementPanel } from "../components/MovementPanel";
-import {
-  MAP_ENABLED,
-  MOVEMENT_PANEL_ENABLED,
-  MOVEMENT_TEST_IGN,
-} from "../appConfig";
+import { MapPositionPanel } from "../components/MapPositionPanel";
+import { MAP_ENABLED } from "../appConfig";
 import {
   EMPTY_MAP_VIEW,
   applyMapMessage,
@@ -134,7 +130,7 @@ export function ChatScreen({
   const [playerListOpen, setPlayerListOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [appInfoOpen, setAppInfoOpen] = useState(false);
-  const [movementOpen, setMovementOpen] = useState(false);
+  const [mapPositionOpen, setMapPositionOpen] = useState(false);
   const [position, setPosition] = useState<PlayerPosition | null>(null);
   const [mapView, setMapView] = useState<MapViewState>(EMPTY_MAP_VIEW);
   const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
@@ -165,11 +161,11 @@ export function ChatScreen({
   const titleTimingRef = useRef<TitleTimingState>(DEFAULT_TITLE_TIMING);
   const autoReconnectAttemptRef = useRef(0);
   const lastAuthAttemptAtRef = useRef(0);
-  const movementOpenRef = useRef(false);
+  const mapPositionOpenRef = useRef(false);
 
-  const resetMovementPanel = useCallback(() => {
-    movementOpenRef.current = false;
-    setMovementOpen(false);
+  const resetMapPositionPanel = useCallback(() => {
+    mapPositionOpenRef.current = false;
+    setMapPositionOpen(false);
     setPosition(null);
     setMapView(EMPTY_MAP_VIEW);
   }, []);
@@ -269,7 +265,7 @@ export function ChatScreen({
             setPlayerList([]);
             setBossBars([]);
             setPlayerVitals(null);
-            resetMovementPanel();
+            resetMapPositionPanel();
             clearTransientOverlays();
           }
           if (msg.connected) {
@@ -315,7 +311,7 @@ export function ChatScreen({
           });
           break;
         case "position":
-          if (!movementOpenRef.current) break;
+          if (!mapPositionOpenRef.current) break;
           setPosition({
             x: msg.x,
             y: msg.y,
@@ -329,7 +325,7 @@ export function ChatScreen({
           break;
         case "map_frame":
         case "map_state":
-          if (!movementOpenRef.current) break;
+          if (!mapPositionOpenRef.current) break;
           setMapView((current) => applyMapMessage(current, msg));
           break;
         case "action_bar":
@@ -411,7 +407,7 @@ export function ChatScreen({
           setPlayerList([]);
           setBossBars([]);
           setPlayerVitals(null);
-          resetMovementPanel();
+          resetMapPositionPanel();
           clearTransientOverlays();
           setMessages((prev) => [
             ...prev,
@@ -449,7 +445,7 @@ export function ChatScreen({
           setSelectedWindowSlot(null);
           setPreviewWindowSlot(null);
           setPendingSlot(null);
-          resetMovementPanel();
+          resetMapPositionPanel();
           clearTransientOverlays();
           setServerInfo((prev) => ({
             ...prev,
@@ -487,7 +483,7 @@ export function ChatScreen({
       clearAutoReconnectTimer,
       clearTransientOverlays,
       onLogout,
-      resetMovementPanel,
+      resetMapPositionPanel,
       userId,
     ],
   );
@@ -593,8 +589,8 @@ export function ChatScreen({
   }, [state, reconnect]);
 
   useEffect(() => {
-    if (state !== "open") resetMovementPanel();
-  }, [resetMovementPanel, state]);
+    if (state !== "open") resetMapPositionPanel();
+  }, [resetMapPositionPanel, state]);
 
   useEffect(() => {
     if (state !== "open" || serverInfo.connected || serverInfo.phase === "joining") return;
@@ -758,21 +754,19 @@ export function ChatScreen({
 
   const handleExitServer = () => {
     setOverflowOpen(false);
-    resetMovementPanel();
-    send({ type: "movement_stop_all" });
+    resetMapPositionPanel();
     send({ type: "position_unsubscribe" });
     send({ type: "map_unsubscribe" });
     send({ type: "logout" });
     onLogout();
   };
 
-  const closeMovement = useCallback(() => {
-    movementOpenRef.current = false;
-    send({ type: "movement_stop_all" });
+  const closeMapPosition = useCallback(() => {
+    mapPositionOpenRef.current = false;
     send({ type: "position_unsubscribe" });
     send({ type: "map_unsubscribe" });
-    resetMovementPanel();
-  }, [resetMovementPanel, send]);
+    resetMapPositionPanel();
+  }, [resetMapPositionPanel, send]);
 
   const handlePlayerSelect = (player: PlayerSummary) => {
     const whisper = `/귓 ${player.name} `;
@@ -785,9 +779,7 @@ export function ChatScreen({
 
   const onlineCount =
     publicStatus.online ?? serverInfo.online ?? (playerList.length > 0 ? playerList.length : undefined);
-  const movementAllowed =
-    MOVEMENT_PANEL_ENABLED &&
-    ign.trim().toLowerCase() === MOVEMENT_TEST_IGN.trim().toLowerCase();
+  const mapPositionAvailable = MAP_ENABLED;
 
   return (
     <KeyboardAvoidingView
@@ -1005,19 +997,19 @@ export function ChatScreen({
             setOverflowOpen(false);
             setAppInfoOpen(true);
           }}
-          movementAllowed={movementAllowed}
-          onOpenMovement={() => {
+          mapPositionAvailable={mapPositionAvailable}
+          onOpenMapPosition={() => {
             setOverflowOpen(false);
-            movementOpenRef.current = true;
+            mapPositionOpenRef.current = true;
             setPosition(null);
             setMapView(EMPTY_MAP_VIEW);
-            setMovementOpen(true);
+            setMapPositionOpen(true);
           }}
           onExitServer={handleExitServer}
         />
 
-        {movementOpen && movementAllowed ? (
-          <MovementModal
+        {mapPositionOpen && mapPositionAvailable ? (
+          <MapPositionModal
             connected={state === "open" && serverInfo.connected}
             position={position}
             map={mapView}
@@ -1025,7 +1017,7 @@ export function ChatScreen({
             send={send}
             onPositionReset={() => setPosition(null)}
             onMapReset={() => setMapView(EMPTY_MAP_VIEW)}
-            onClose={closeMovement}
+            onClose={closeMapPosition}
           />
         ) : null}
 
@@ -1695,8 +1687,8 @@ function OverflowMenuModal({
   onReconnect,
   onOpenPlayers,
   onOpenAppInfo,
-  movementAllowed,
-  onOpenMovement,
+  mapPositionAvailable,
+  onOpenMapPosition,
   onExitServer,
 }: {
   visible: boolean;
@@ -1712,8 +1704,8 @@ function OverflowMenuModal({
   onReconnect: () => void;
   onOpenPlayers: () => void;
   onOpenAppInfo: () => void;
-  movementAllowed: boolean;
-  onOpenMovement: () => void;
+  mapPositionAvailable: boolean;
+  onOpenMapPosition: () => void;
   onExitServer: () => void;
 }) {
   return (
@@ -1751,11 +1743,11 @@ function OverflowMenuModal({
               subtitle="탭하면 귓속말 입력창에 닉네임을 불러옵니다"
               onPress={onOpenPlayers}
             />
-            {movementAllowed ? (
+            {mapPositionAvailable ? (
               <OverflowMenuRow
-                title="이동 및 좌표"
-                subtitle="누르는 동안만 이동하며 창을 닫으면 즉시 멈춥니다"
-                onPress={onOpenMovement}
+                title="주변 지도 · 좌표"
+                subtitle="열어 둔 동안에만 현재 위치와 주변 지도를 불러옵니다"
+                onPress={onOpenMapPosition}
               />
             ) : null}
             <OverflowMenuRow
@@ -1776,7 +1768,7 @@ function OverflowMenuModal({
   );
 }
 
-function MovementModal({
+function MapPositionModal({
   connected,
   position,
   map,
@@ -1797,31 +1789,31 @@ function MovementModal({
 }) {
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.movementBackdrop}>
-        <Pressable style={styles.movementBackdropTouch} onPress={onClose} />
-        <View style={[styles.movementSheet, WEB_GLASS_BLUR]}>
-          <View style={styles.movementHeader}>
-            <View style={styles.movementHeaderCopy}>
-              <Text style={styles.movementTitle}>이동 및 좌표</Text>
-              <Text style={styles.movementSubtitle}>손을 떼거나 창을 닫으면 즉시 정지합니다</Text>
+      <View style={styles.mapPositionBackdrop}>
+        <Pressable style={styles.mapPositionBackdropTouch} onPress={onClose} />
+        <View style={[styles.mapPositionSheet, WEB_GLASS_BLUR]}>
+          <View style={styles.mapPositionHeader}>
+            <View style={styles.mapPositionHeaderCopy}>
+              <Text style={styles.mapPositionTitle}>주변 지도 · 좌표</Text>
+              <Text style={styles.mapPositionSubtitle}>이 창을 열어 둔 동안에만 위치를 갱신합니다</Text>
             </View>
             <Pressable
-              accessibilityLabel="이동 창 닫기"
+              accessibilityLabel="지도와 좌표 창 닫기"
               accessibilityRole="button"
               style={({ pressed }) => [
-                styles.movementClose,
-                pressed ? styles.movementClosePressed : null,
+                styles.mapPositionClose,
+                pressed ? styles.mapPositionClosePressed : null,
               ]}
               onPress={onClose}
             >
-              <Text style={styles.movementCloseText}>×</Text>
+              <Text style={styles.mapPositionCloseText}>×</Text>
             </Pressable>
           </View>
           <ScrollView
             showsVerticalScrollIndicator={false}
-            style={styles.movementScroll}
+            style={styles.mapPositionScroll}
           >
-            <MovementPanel
+            <MapPositionPanel
               connected={connected}
               position={position}
               map={map}
@@ -1829,7 +1821,6 @@ function MovementModal({
               send={send}
               onPositionReset={onPositionReset}
               onMapReset={onMapReset}
-              enabled
             />
           </ScrollView>
         </View>
@@ -2986,7 +2977,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 4,
   },
-  movementBackdrop: {
+  mapPositionBackdrop: {
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-end",
@@ -2994,11 +2985,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: Platform.OS === "ios" ? 22 : 14,
   },
-  movementBackdropTouch: {
+  mapPositionBackdropTouch: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 0,
   },
-  movementSheet: {
+  mapPositionSheet: {
     width: "100%",
     maxWidth: 460,
     maxHeight: "92%",
@@ -3013,32 +3004,32 @@ const styles = StyleSheet.create({
     shadowRadius: 30,
     shadowOffset: { width: 0, height: 16 },
   },
-  movementHeader: {
+  mapPositionHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 4,
     paddingBottom: 12,
   },
-  movementScroll: {
+  mapPositionScroll: {
     flexShrink: 1,
   },
-  movementHeaderCopy: {
+  mapPositionHeaderCopy: {
     flex: 1,
     minWidth: 0,
   },
-  movementTitle: {
+  mapPositionTitle: {
     color: theme.text,
     fontSize: 20,
     fontWeight: "900",
   },
-  movementSubtitle: {
+  mapPositionSubtitle: {
     color: theme.textDim,
     fontSize: 12,
     lineHeight: 17,
     marginTop: 3,
   },
-  movementClose: {
+  mapPositionClose: {
     width: 42,
     height: 42,
     borderRadius: 21,
@@ -3048,11 +3039,11 @@ const styles = StyleSheet.create({
     borderColor: theme.borderStrong,
     backgroundColor: theme.cardElevated,
   },
-  movementClosePressed: {
+  mapPositionClosePressed: {
     backgroundColor: "rgba(240, 246, 252, 0.12)",
     transform: [{ scale: 0.96 }],
   },
-  movementCloseText: {
+  mapPositionCloseText: {
     color: theme.text,
     fontSize: 28,
     lineHeight: 30,

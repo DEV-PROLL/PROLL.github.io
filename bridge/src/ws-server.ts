@@ -14,11 +14,6 @@ import { AuthService, type AuthResult, type DeviceCode } from "./auth";
 import type { McSession } from "./mc-session";
 import type { SessionManager } from "./session-manager";
 import { assertSupportedMcVersion } from "./mc-versions";
-import {
-  isMovementAllowed,
-  MovementRateGate,
-  parseMovementControlMessage,
-} from "./movement-control";
 import { isAdminRequestAllowed } from "./admin-access";
 import { MapSubscriptionGate } from "./map-subscription-control";
 
@@ -114,7 +109,6 @@ interface RuntimeStats {
   sessionReuses: number;
   graceReconnects: number;
   kicked: number;
-  movementRateLimited: number;
   eventLoopDelay: IntervalHistogram;
   recentKicks: RecentIssue[];
   recentErrors: RecentIssue[];
@@ -178,7 +172,6 @@ export function startWsServer(
     sessionReuses: 0,
     graceReconnects: 0,
     kicked: 0,
-    movementRateLimited: 0,
     eventLoopDelay,
     recentKicks: [],
     recentErrors: [],
@@ -188,7 +181,6 @@ export function startWsServer(
   const pendingLogins = new Map<string, PendingLogin>();
   const clientTickets = new Map<string, ClientTicket>();
   const rateLimits = new Map<string, RateLimitBucket>();
-  const movementRateGate = new MovementRateGate();
   const mapSubscriptionGate = new MapSubscriptionGate(cfg.mapMaxSubscribers);
 
   const httpServer = http.createServer((req, res) => {
@@ -292,7 +284,6 @@ export function startWsServer(
         sessions,
         pendingLogins,
         stats,
-        movementRateGate,
         mapSubscriptionGate,
       ).catch((err) => {
         send({ type: "error", text: err?.message ?? String(err) });
@@ -300,10 +291,8 @@ export function startWsServer(
     });
 
     ws.on("close", () => {
-      state.mcSession?.stopMovementForClient(state.sessionKey);
       state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
       state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
-      movementRateGate.clear(state.sessionKey);
       mapSubscriptionGate.clear(state.sessionKey);
       stats.activeWs = Math.max(0, stats.activeWs - 1);
       if (state.authenticatedUserId) {
@@ -320,10 +309,8 @@ export function startWsServer(
 
     ws.on("error", () => {
       // Mirror close cleanup; ws will fire 'close' too but be defensive.
-      state.mcSession?.stopMovementForClient(state.sessionKey);
       state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
       state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
-      movementRateGate.clear(state.sessionKey);
       mapSubscriptionGate.clear(state.sessionKey);
       if (state.sessionId && state.listener) {
         sessions.detach(state.sessionId, state.listener);
@@ -821,7 +808,6 @@ function buildAdminStatus(
       allowedOrigins: cfg.allowedOrigins ?? ["*"],
       maxMessageBytes: MAX_WS_MESSAGE_BYTES,
       sessionGraceMs: cfg.sessionGraceMs,
-      movementAllowedIgnCount: cfg.movementAllowedIgns.length,
       headMetadataEnabled: cfg.headMetadataEnabled,
       headDebugEnabled: cfg.headDebugEnabled,
       mapEnabled: cfg.mapEnabled,
@@ -881,7 +867,6 @@ function buildAdminStatus(
       sessionReuses: stats.sessionReuses,
       graceReconnects: stats.graceReconnects,
       kicked: stats.kicked,
-      movementRateLimited: stats.movementRateLimited,
     },
     sessions: sessionStats,
     headDiagnostics,
@@ -1202,7 +1187,6 @@ async function handleMessage(
   sessions: SessionManager,
   pendingLogins: Map<string, PendingLogin>,
   stats: RuntimeStats,
-  movementRateGate: MovementRateGate,
   mapSubscriptionGate: MapSubscriptionGate,
 ): Promise<void> {
   switch (msg.type) {
@@ -1342,44 +1326,6 @@ async function handleMessage(
       return;
     }
 
-    case "movement_control": {
-      if (!state.mcSession) {
-        send({ type: "error", text: "not authenticated" });
-        return;
-      }
-      if (!isMovementAllowed(state.authenticatedUserId, cfg.movementAllowedIgns)) {
-        stats.messagesRejected += 1;
-        send({ type: "error", text: "movement is not enabled for this account" });
-        return;
-      }
-      const parsed = parseMovementControlMessage(msg);
-      if (!parsed.ok) {
-        stats.messagesRejected += 1;
-        send({ type: "error", text: parsed.reason });
-        return;
-      }
-      if (parsed.value.pressed && !movementRateGate.allow(state.sessionKey, Date.now())) {
-        stats.messagesRejected += 1;
-        stats.movementRateLimited += 1;
-        send({ type: "error", text: "movement rate limited" });
-        return;
-      }
-      const { control, pressed, holdMs } = parsed.value;
-      const result = state.mcSession.setMovementControl(
-        state.sessionKey,
-        control,
-        pressed,
-        holdMs,
-      );
-      if (!result.ok) send({ type: "error", text: result.reason });
-      return;
-    }
-
-    case "movement_stop_all": {
-      state.mcSession?.stopMovementForClient(state.sessionKey);
-      return;
-    }
-
     case "position_subscribe": {
       if (!state.mcSession) {
         send({ type: "error", text: "not authenticated" });
@@ -1442,7 +1388,6 @@ async function handleMessage(
         return;
       }
       if (state.sessionId && state.listener) {
-        state.mcSession?.stopMovementForClient(state.sessionKey);
         state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
         state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
         mapSubscriptionGate.clear(state.sessionKey);
@@ -1464,7 +1409,6 @@ async function handleMessage(
 
     case "logout": {
       if (state.sessionId && state.listener) {
-        state.mcSession?.stopMovementForClient(state.sessionKey);
         state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
         state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
         mapSubscriptionGate.clear(state.sessionKey);
@@ -1625,7 +1569,6 @@ function detachClientSession(
   mapSubscriptionGate: MapSubscriptionGate,
 ): void {
   if (!state.sessionId || !state.listener) return;
-  state.mcSession?.stopMovementForClient(state.sessionKey);
   state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
   state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
   mapSubscriptionGate.clear(state.sessionKey);

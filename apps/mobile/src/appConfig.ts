@@ -4,17 +4,6 @@ export const DEFAULT_SERVER_ADDRESS = "99999.kr";
 export const DEFAULT_SERVER_ID = "ludulgi";
 export const DEFAULT_SERVER_LABEL = "루둘기";
 
-const movementFeature =
-  typeof process !== "undefined"
-    ? process.env.EXPO_PUBLIC_MOVEMENT_ENABLED?.trim().toLowerCase()
-    : undefined;
-
-export const MOVEMENT_PANEL_ENABLED =
-  movementFeature === "1" ||
-  movementFeature === "true" ||
-  // Initial private rollout cohort requested by the movement coordinator.
-  movementFeature === "_pelol";
-
 const headRenderFeature =
   typeof process !== "undefined"
     ? process.env.EXPO_PUBLIC_HEAD_RENDER_ENABLED?.trim().toLowerCase()
@@ -30,13 +19,6 @@ const mapFeature =
 
 export const MAP_ENABLED =
   mapFeature === "1" || mapFeature === "true";
-
-const movementTestIgn =
-  typeof process !== "undefined"
-    ? process.env.EXPO_PUBLIC_MOVEMENT_TEST_IGN?.trim()
-    : undefined;
-
-export const MOVEMENT_TEST_IGN = movementTestIgn || "vmfhf";
 
 export function normalizeServerId(value: string | null | undefined): string {
   const trimmed = value?.trim().toLowerCase();

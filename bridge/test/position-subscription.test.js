@@ -8,7 +8,6 @@ class FakeMcSession extends EventEmitter {
   constructor() {
     super();
     this.positionSubscribers = new Map();
-    this.stoppedMovementClients = [];
     this.stoppedPositionClients = [];
   }
 
@@ -56,10 +55,6 @@ class FakeMcSession extends EventEmitter {
     this.emit("position-stopped", clientId);
   }
 
-  stopMovementForClient(clientId) {
-    this.stoppedMovementClients.push(clientId);
-  }
-
   stopMapSubscriptionForClient() {}
 }
 
@@ -85,7 +80,7 @@ function bridgeFixture() {
     forceClose() {},
     forceCloseUser() {},
     stats() {
-      return { active: 1, movementActive: 0, max: 2, sessions: [] };
+      return { active: 1, max: 2, sessions: [] };
     },
   };
   const auth = {
@@ -121,7 +116,6 @@ function bridgeFixture() {
     maxSessions: 2,
     chatRateLimit: 5,
     sessionGraceMs: 1_000,
-    movementAllowedIgns: ["tester"],
     headMetadataEnabled: false,
     headDebugEnabled: false,
   };
@@ -185,6 +179,5 @@ test("position protocol subscribes, unsubscribes, and cleans up on close", async
   // Then
   assert.equal(firstPosition.type, "position");
   assert.equal(session.positionSubscribers.size, 0);
-  assert.equal(session.stoppedMovementClients.length, 1);
   assert.equal(session.stoppedPositionClients.length, 2);
 });

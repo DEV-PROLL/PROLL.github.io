@@ -11,6 +11,7 @@ import {
 import { HEAD_RENDER_ENABLED } from "../appConfig";
 import {
   MINECRAFT_ASSETS_BASE_URL,
+  minecraftSpecialItemTexture,
   minecraftSkinAspectRatio,
   minecraftTextureUrls,
   nextImageTierIndex,
@@ -48,12 +49,21 @@ export function MinecraftItemIcon({
       HEAD_RENDER_ENABLED && isPlayerHead
         ? playerHeadTextureTiers(head)
         : [];
+    const specialSource = minecraftSpecialItemTexture(
+      MINECRAFT_ASSETS_BASE_URL,
+      mcVersion,
+      itemName,
+    );
     const itemSources = minecraftTextureUrls(
       MINECRAFT_ASSETS_BASE_URL,
       mcVersion,
       itemName,
     ).map((url): IconSource => ({ kind: "item", url }));
-    return [...headSources, ...itemSources];
+    return [
+      ...headSources,
+      ...(specialSource ? [specialSource] : []),
+      ...itemSources,
+    ];
   }, [
     head?.playerName,
     head?.playerUuid,
@@ -109,6 +119,15 @@ export function MinecraftItemIcon({
           onLoad={handleLoad}
           onError={handleError}
         />
+      ) : textureSource?.kind === "chest" ? (
+        <ChestTextureIcon
+          key={textureSource.url}
+          url={textureSource.url}
+          size={size}
+          loaded={textureLoaded}
+          onLoad={handleLoad}
+          onError={handleError}
+        />
       ) : textureSource ? (
         <Image
           key={textureSource.url}
@@ -129,7 +148,69 @@ type IconSource =
   | {
       readonly kind: "item";
       readonly url: string;
+    }
+  | {
+      readonly kind: "chest";
+      readonly url: string;
     };
+
+function ChestTextureIcon({
+  url,
+  size,
+  loaded,
+  onLoad,
+  onError,
+}: {
+  readonly url: string;
+  readonly size: number;
+  readonly loaded: boolean;
+  readonly onLoad: () => void;
+  readonly onError: () => void;
+}) {
+  const faceWidth = size * 0.82;
+  const scale = faceWidth / 14;
+  const lidHeight = scale * 5;
+  const bodyHeight = scale * 10;
+  const atlasSize = scale * 64;
+  const cropStyle = {
+    width: atlasSize,
+    height: atlasSize,
+    left: -14 * scale,
+  } as const;
+
+  return (
+    <View style={[styles.chest, loaded ? null : styles.hidden]}>
+      <View style={[styles.chestLid, { width: faceWidth, height: lidHeight }]}>
+        <Image
+          source={{ uri: url }}
+          resizeMode="stretch"
+          accessibilityIgnoresInvertColors
+          onLoad={onLoad}
+          onError={onError}
+          style={[pixelatedChestStyle, cropStyle, { top: -10 * scale }]}
+        />
+      </View>
+      <View style={[styles.chestBody, { width: faceWidth, height: bodyHeight }]}>
+        <Image
+          source={{ uri: url }}
+          resizeMode="stretch"
+          accessibilityIgnoresInvertColors
+          style={[pixelatedChestStyle, cropStyle, { top: -33 * scale }]}
+        />
+      </View>
+      <View
+        style={[
+          styles.chestLatch,
+          {
+            width: Math.max(2, scale * 2),
+            height: Math.max(3, scale * 4),
+            top: (size - lidHeight - bodyHeight) / 2 + lidHeight - scale,
+          },
+        ]}
+      />
+    </View>
+  );
+}
 
 function PlayerSkinFace({
   url,
@@ -220,6 +301,13 @@ const pixelatedSkinStyle: ImageStyle & {
   imageRendering: "pixelated",
 };
 
+const pixelatedChestStyle: ImageStyle & {
+  readonly imageRendering: "pixelated";
+} = {
+  position: "absolute",
+  imageRendering: "pixelated",
+};
+
 const styles = StyleSheet.create({
   frame: {
     flexShrink: 0,
@@ -239,6 +327,25 @@ const styles = StyleSheet.create({
   skinCrop: {
     ...StyleSheet.absoluteFillObject,
     overflow: "hidden",
+  },
+  chest: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chestLid: {
+    overflow: "hidden",
+  },
+  chestBody: {
+    overflow: "hidden",
+  },
+  chestLatch: {
+    position: "absolute",
+    alignSelf: "center",
+    borderRadius: 1,
+    backgroundColor: "#d7d7d7",
+    borderWidth: 1,
+    borderColor: "#6f6f6f",
   },
   hidden: {
     opacity: 0,

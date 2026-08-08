@@ -14,6 +14,11 @@ export interface PlayerHeadTextureTier {
   readonly url: string;
 }
 
+export interface SpecialItemTexture {
+  readonly kind: "chest";
+  readonly url: string;
+}
+
 declare global {
   var __MINECRAFT_ASSETS_BASE_URL__: string | undefined;
 }
@@ -84,10 +89,53 @@ export function minecraftTextureUrls(
 
   const normalizedBaseUrl = resolveMinecraftAssetsBaseUrl(baseUrl, undefined);
   const textureRoot = `${normalizedBaseUrl}/data/${version}`;
-  return [
+  const urls = [
     `${textureRoot}/items/${normalizedName}.png`,
     `${textureRoot}/blocks/${normalizedName}.png`,
   ];
+  const fallbackName = fallbackBlockTextureName(normalizedName);
+  if (fallbackName) urls.push(`${textureRoot}/blocks/${fallbackName}.png`);
+  return urls;
+}
+
+export function minecraftSpecialItemTexture(
+  baseUrl: string,
+  mcVersion: string,
+  itemName: string,
+): SpecialItemTexture | null {
+  const version = minecraftAssetVersion(mcVersion);
+  const normalizedName = normalizeMinecraftAssetName(itemName);
+  if (!version || !normalizedName) return null;
+  const chestTexture = chestTextureName(normalizedName);
+  if (!chestTexture) return null;
+
+  const normalizedBaseUrl = resolveMinecraftAssetsBaseUrl(baseUrl, undefined);
+  return {
+    kind: "chest",
+    url: `${normalizedBaseUrl}/data/${version}/entity/chest/${chestTexture}.png`,
+  };
+}
+
+function fallbackBlockTextureName(itemName: string): string | null {
+  const coloredItem = /^([a-z_]+)_(bed|banner)$/.exec(itemName);
+  if (coloredItem) return `${coloredItem[1]}_wool`;
+  if (itemName === "decorated_pot") return "terracotta";
+  return null;
+}
+
+function chestTextureName(itemName: string): string | null {
+  if (itemName === "chest") return "normal";
+  if (itemName === "trapped_chest") return "trapped";
+  if (itemName === "ender_chest") return "ender";
+
+  const unwaxedName = itemName.replace(/^waxed_/, "");
+  const copperTextures: Readonly<Record<string, string>> = {
+    copper_chest: "copper",
+    exposed_copper_chest: "copper_exposed",
+    weathered_copper_chest: "copper_weathered",
+    oxidized_copper_chest: "copper_oxidized",
+  };
+  return copperTextures[unwaxedName] ?? null;
 }
 
 export function isValidTextureId(value: unknown): value is string {

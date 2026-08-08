@@ -7,6 +7,7 @@ import {
   mcHeadsAvatarUrl,
   minecraftAssetVersion,
   minecraftSkinAspectRatio,
+  minecraftSpecialItemTexture,
   minecraftTextureUrls,
   nextImageTierIndex,
   normalizeMinecraftAssetName,
@@ -104,6 +105,43 @@ test("builds item-first and block-fallback texture URLs", () => {
     "https://assets.example.test/root/data/1.20.2/items/stone.png",
     "https://assets.example.test/root/data/1.20.2/blocks/stone.png",
   ]);
+});
+
+test("uses entity atlases for chest-family icons", () => {
+  const baseUrl = "https://assets.example.test/root";
+
+  assert.deepEqual(
+    minecraftSpecialItemTexture(baseUrl, "1.21.11", "minecraft:chest"),
+    {
+      kind: "chest",
+      url: "https://assets.example.test/root/data/1.21.11/entity/chest/normal.png",
+    },
+  );
+  assert.equal(
+    minecraftSpecialItemTexture(baseUrl, "1.21.11", "waxed_oxidized_copper_chest")?.url,
+    "https://assets.example.test/root/data/1.21.11/entity/chest/copper_oxidized.png",
+  );
+  assert.equal(
+    minecraftSpecialItemTexture(baseUrl, "1.21.11", "diamond_sword"),
+    null,
+  );
+});
+
+test("adds material fallbacks for model-rendered GUI items", () => {
+  const baseUrl = "https://assets.example.test/root";
+
+  assert.equal(
+    minecraftTextureUrls(baseUrl, "1.21.11", "red_bed").at(-1),
+    "https://assets.example.test/root/data/1.21.11/blocks/red_wool.png",
+  );
+  assert.equal(
+    minecraftTextureUrls(baseUrl, "1.21.11", "white_banner").at(-1),
+    "https://assets.example.test/root/data/1.21.11/blocks/white_wool.png",
+  );
+  assert.equal(
+    minecraftTextureUrls(baseUrl, "1.21.11", "decorated_pot").at(-1),
+    "https://assets.example.test/root/data/1.21.11/blocks/terracotta.png",
+  );
 });
 
 test("does not build texture URLs for invalid resource inputs", () => {

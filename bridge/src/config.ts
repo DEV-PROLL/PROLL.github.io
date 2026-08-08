@@ -58,18 +58,11 @@ export function loadConfig(): BridgeConfig {
     maxSessions: num("MAX_SESSIONS", 20),
     chatRateLimit: num("CHAT_RATE_LIMIT", 2),
     sessionGraceMs: positiveInt("SESSION_GRACE_MS", 30 * 60 * 1000),
-    movementAllowedIgns: csv("MOVEMENT_ALLOWED_IGNS"),
     headMetadataEnabled: HEAD_METADATA_ENABLED,
     headDebugEnabled: HEAD_DEBUG_ENABLED,
     mapEnabled: process.env.MAP_ENABLED === "true" || process.env.MAP_ENABLED === "1",
     mapMaxSubscribers: positiveInt("MAP_MAX_SUBSCRIBERS", 2),
   };
-}
-
-function csv(name: string): string[] {
-  const value = process.env[name]?.trim();
-  if (!value) return [];
-  return [...new Set(value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean))];
 }
 
 function parseServerProfiles(

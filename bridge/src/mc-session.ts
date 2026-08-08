@@ -25,12 +25,6 @@ import {
   rawJson,
   richSegments,
 } from "./chat-format";
-import {
-  MOVEMENT_CONTROLS,
-  MovementLeaseBook,
-  toPlayerInputFlags,
-  type MovementControl,
-} from "./movement-control";
 import { headingFromMineflayerYaw } from "./position-direction";
 import { HEAD_DEBUG_ENABLED, HEAD_METADATA_ENABLED } from "./config";
 import { MapSubscriptionSession } from "./map-subscription-session";
@@ -51,67 +45,7 @@ interface PositionSubscription {
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
 const POSITION_SYNC_MS = 250;
 const POSITION_HEARTBEAT_MS = 1_000;
-const POSITION_SAMPLE_WINDOW_MS = 3_000;
-const POSITION_SAMPLE_LIMIT = 12;
 const debuggedGuiItems = new Set<string>();
-
-const MOVEMENT_EPOCH_EVENTS = [
-  "start_configuration",
-  "login",
-  "respawn",
-  "death",
-  "mount",
-] as const;
-const MOVEMENT_DIAGNOSTIC_EVENTS = [
-  ...MOVEMENT_EPOCH_EVENTS,
-  "forcedMove",
-] as const;
-
-type MovementEpochEvent = (typeof MOVEMENT_EPOCH_EVENTS)[number];
-export type MovementDiagnosticEvent = (typeof MOVEMENT_DIAGNOSTIC_EVENTS)[number];
-
-export interface MovementEventDiagnostic {
-  readonly count: number;
-  readonly lastAt?: number;
-}
-
-export interface MovementPositionSample {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  readonly ts: number;
-}
-
-export interface MovementPositionDelta {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  readonly distance: number;
-  readonly elapsedMs: number;
-}
-
-export interface MovementPositionDelta3s {
-  readonly from: MovementPositionSample;
-  readonly to: MovementPositionSample;
-  readonly delta: MovementPositionDelta;
-  readonly samples: readonly MovementPositionSample[];
-}
-
-export interface MovementDiagnostics {
-  readonly controls: MovementControl[];
-  readonly botControls: Record<MovementControl, boolean>;
-  readonly physicsEnabled: boolean;
-  readonly blockLoaded: boolean;
-  readonly gameMode?: string;
-  readonly velocity?: { readonly x: number; readonly y: number; readonly z: number };
-  readonly movementEpoch: number;
-  readonly teleportEpoch: number;
-  readonly epochEvents: Record<MovementDiagnosticEvent, MovementEventDiagnostic>;
-  readonly lastForcedMoveAt?: number;
-  readonly lastPhysicsTickAt?: number;
-  readonly loadedColumns: number;
-  readonly positionDelta3s?: MovementPositionDelta3s;
-}
 
 export interface HeadInspection {
   readonly head?: GuiItem["head"];
@@ -164,27 +98,9 @@ export class McSession extends EventEmitter {
   private lastBossBarsSignature = "";
   private lastPlayerStateSignature = "";
   private readonly suppressedBossBarIds = new Set<string>();
-  private readonly movementLeases = new MovementLeaseBook();
   private readonly positionSubscriptions = new Map<string, PositionSubscription>();
   private readonly mapSubscriptions: MapSubscriptionSession;
   private positionTimer: NodeJS.Timeout | null = null;
-  private movementWatchdogTimer: NodeJS.Timeout | null = null;
-  private movementEpoch = 0;
-  private teleportEpoch = 0;
-  private readonly epochEvents: Record<
-    MovementDiagnosticEvent,
-    MovementEventDiagnostic
-  > = {
-    start_configuration: { count: 0 },
-    login: { count: 0 },
-    respawn: { count: 0 },
-    death: { count: 0 },
-    mount: { count: 0 },
-    forcedMove: { count: 0 },
-  };
-  private lastForcedMoveAt: number | undefined;
-  private lastPhysicsTickAt: number | undefined;
-  private readonly movementPositionSamples: MovementPositionSample[] = [];
   private readonly headDiagnosticShapes = new Set<string>();
   private readonly headDiagnosticCounters: {
     headsSeen: number;
@@ -325,16 +241,6 @@ export class McSession extends EventEmitter {
     bot.on("experience", () => {
       this.emitPlayerState();
     });
-    bot.on("physicsTick", () => {
-      this.lastPhysicsTickAt = this.now();
-      const active = this.movementLeases.activeControls();
-      if (active.size > 0) this.writeMovementInput(bot, active);
-    });
-    bot.on("login", () => this.recordMovementEpoch("login"));
-    bot.on("respawn", () => this.recordMovementEpoch("respawn"));
-    bot.on("death", () => this.recordMovementEpoch("death"));
-    bot.on("mount", () => this.recordMovementEpoch("mount"));
-    bot.on("forcedMove", () => this.recordForcedMove());
     bot.on("blockUpdate", () => this.mapSubscriptions.markDirty());
     bot.on("chunkColumnLoad", () => this.mapSubscriptions.markDirty());
     bot.on("chunkColumnUnload", () => this.mapSubscriptions.markDirty());
@@ -437,7 +343,6 @@ export class McSession extends EventEmitter {
     bot.on("kicked", (reason: unknown) => {
       const normalized = normalizeKickReason(reason);
       console.warn(`[mc-session] kicked reason=${normalized}`);
-      this.stopAllMovement();
       this.clearPositionSubscriptions();
       this.mapSubscriptions.clear();
       this.emitMsg({
@@ -493,7 +398,6 @@ export class McSession extends EventEmitter {
     });
 
     client.on("start_configuration", () => {
-      this.recordMovementEpoch("start_configuration");
       this.mapSubscriptions.suspend("configuration");
       dedupeProtocolOnceListeners(clientEmitter, [
         "select_known_packs",
@@ -637,101 +541,6 @@ export class McSession extends EventEmitter {
     }
   }
 
-  setMovementControl(
-    clientId: string,
-    control: MovementControl,
-    pressed: boolean,
-    holdMs: number,
-  ): { ok: true } | { ok: false; reason: string } {
-    const bot = this.bot;
-    if (pressed && (!bot || !this.connected)) {
-      return { ok: false, reason: "not connected" };
-    }
-    if (pressed) {
-      this.movementLeases.press(clientId, control, holdMs, this.now());
-    } else {
-      this.movementLeases.release(clientId, control);
-    }
-    this.syncMovementControls();
-    this.armMovementWatchdog();
-    return { ok: true };
-  }
-
-  stopMovementForClient(clientId: string): void {
-    if (!this.movementLeases.stopClient(clientId)) return;
-    this.syncMovementControls();
-    this.armMovementWatchdog();
-  }
-
-  private stopAllMovement(): void {
-    this.movementLeases.stopAll();
-    this.syncMovementControls();
-    this.stopMovementWatchdog();
-  }
-
-  isMovementActive(): boolean {
-    return this.movementLeases.isActive();
-  }
-
-  movementClientCount(): number {
-    return this.movementLeases.activeClientCount();
-  }
-
-  movementDiagnostics(): MovementDiagnostics {
-    const bot = this.bot;
-    const position = bot?.entity?.position;
-    const velocity = bot?.entity?.velocity;
-    let blockLoaded = false;
-    let loadedColumns = 0;
-
-    // Mineflayer can clear `world` before the session object is detached. The
-    // admin dashboard may sample this short teardown window, so diagnostics
-    // must remain observational and never take down the bridge process.
-    try {
-      blockLoaded = Boolean(bot && position && bot.blockAt(position, false));
-    } catch {
-      blockLoaded = false;
-    }
-    try {
-      const world = bot?.world as
-        | { getColumns?: () => unknown[] }
-        | undefined;
-      loadedColumns = world?.getColumns?.().length ?? 0;
-    } catch {
-      loadedColumns = 0;
-    }
-
-    return {
-      controls: [...this.movementLeases.activeControls()],
-      botControls: Object.fromEntries(
-        MOVEMENT_CONTROLS.map((control) => [
-          control,
-          bot?.getControlState(control) === true,
-        ]),
-      ) as Record<MovementControl, boolean>,
-      physicsEnabled: bot?.physicsEnabled === true,
-      blockLoaded,
-      gameMode: bot?.game?.gameMode,
-      velocity: velocity
-        ? { x: velocity.x, y: velocity.y, z: velocity.z }
-        : undefined,
-      movementEpoch: this.movementEpoch,
-      teleportEpoch: this.teleportEpoch,
-      epochEvents: {
-        start_configuration: { ...this.epochEvents.start_configuration },
-        login: { ...this.epochEvents.login },
-        respawn: { ...this.epochEvents.respawn },
-        death: { ...this.epochEvents.death },
-        mount: { ...this.epochEvents.mount },
-        forcedMove: { ...this.epochEvents.forcedMove },
-      },
-      lastForcedMoveAt: this.lastForcedMoveAt,
-      lastPhysicsTickAt: this.lastPhysicsTickAt,
-      loadedColumns,
-      positionDelta3s: this.positionDelta3s(),
-    };
-  }
-
   headDiagnostics(): HeadDiagnostics {
     return {
       headsSeen: this.headDiagnosticCounters.headsSeen,
@@ -763,65 +572,6 @@ export class McSession extends EventEmitter {
     }
     this.headDiagnosticShapes.add(signature);
     console.info(`[mc-session] head_shape ${signature}`);
-  }
-
-  private recordMovementEpoch(event: MovementEpochEvent): void {
-    const now = this.now();
-    this.movementEpoch += 1;
-    this.epochEvents[event] = {
-      count: this.epochEvents[event].count + 1,
-      lastAt: now,
-    };
-  }
-
-  private recordForcedMove(): void {
-    const now = this.now();
-    this.teleportEpoch = this.movementEpoch;
-    this.lastForcedMoveAt = now;
-    this.epochEvents.forcedMove = {
-      count: this.epochEvents.forcedMove.count + 1,
-      lastAt: now,
-    };
-  }
-
-  private recordPositionSample(position: PositionMessage): void {
-    this.movementPositionSamples.push({
-      x: position.x,
-      y: position.y,
-      z: position.z,
-      ts: position.ts,
-    });
-    const windowStart = position.ts - POSITION_SAMPLE_WINDOW_MS;
-    while (this.movementPositionSamples[0]?.ts < windowStart) {
-      this.movementPositionSamples.shift();
-    }
-    if (this.movementPositionSamples.length > POSITION_SAMPLE_LIMIT) {
-      this.movementPositionSamples.splice(
-        0,
-        this.movementPositionSamples.length - POSITION_SAMPLE_LIMIT,
-      );
-    }
-  }
-
-  private positionDelta3s(): MovementPositionDelta3s | undefined {
-    const from = this.movementPositionSamples[0];
-    const to = this.movementPositionSamples.at(-1);
-    if (!from || !to) return undefined;
-    const x = to.x - from.x;
-    const y = to.y - from.y;
-    const z = to.z - from.z;
-    return {
-      from: { ...from },
-      to: { ...to },
-      delta: {
-        x,
-        y,
-        z,
-        distance: Math.hypot(x, y, z),
-        elapsedMs: to.ts - from.ts,
-      },
-      samples: this.movementPositionSamples.map((sample) => ({ ...sample })),
-    };
   }
 
   // Push a message to listeners and store it in the per-user history ring.
@@ -899,7 +649,6 @@ export class McSession extends EventEmitter {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     this.stopAntiAfk();
-    this.stopAllMovement();
     this.clearPositionSubscriptions();
     this.mapSubscriptions.clear();
     this.clearConfigurationRestartWatchdog();
@@ -926,7 +675,6 @@ export class McSession extends EventEmitter {
     const normalizedReason = reason || "ended";
     console.warn(`[mc-session] ended reason=${normalizedReason}`);
     this.stopAntiAfk();
-    this.stopAllMovement();
     this.clearPositionSubscriptions();
     this.mapSubscriptions.clear();
     this.clearConfigurationRestartWatchdog();
@@ -1203,7 +951,6 @@ export class McSession extends EventEmitter {
   private emitPosition(force = false): void {
     const msg = this.positionSnapshot();
     if (!msg) return;
-    this.recordPositionSample(msg);
     for (const [clientId, subscription] of this.positionSubscriptions) {
       this.deliverPosition(clientId, subscription, msg, force);
     }
@@ -1250,64 +997,6 @@ export class McSession extends EventEmitter {
     subscription.lastSignature = signature;
     subscription.lastEmittedAt = msg.ts;
     subscription.listener(msg);
-  }
-
-  private syncMovementControls(): void {
-    const bot = this.bot;
-    if (!bot) return;
-    const active = this.movementLeases.activeControls();
-    bot.clearControlStates();
-    if (active.size === 0) {
-      // Modern servers retain the last player_input flags until the client
-      // explicitly sends a neutral packet. Send it before pausing physics so
-      // release, lease expiry, disconnect, and shutdown cannot leave stale
-      // movement active server-side.
-      this.writeMovementInput(bot, active);
-      bot.physicsEnabled = false;
-      return;
-    }
-    bot.physicsEnabled = true;
-    for (const control of MOVEMENT_CONTROLS) {
-      if (active.has(control)) bot.setControlState(control, true);
-    }
-    this.writeMovementInput(bot, active);
-  }
-
-  private writeMovementInput(
-    bot: Bot,
-    controls: ReadonlySet<MovementControl>,
-  ): void {
-    if (!bot.supportFeature("newPlayerInputPacket")) return;
-    try {
-      bot._client.write("player_input", {
-        inputs: toPlayerInputFlags(controls),
-      });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      console.warn(`[mc-session] failed to write player_input reason=${reason}`);
-    }
-  }
-
-  private armMovementWatchdog(): void {
-    this.stopMovementWatchdog();
-    const expiresAt = this.movementLeases.nextExpiryAt();
-    if (expiresAt == null) return;
-    this.movementWatchdogTimer = setTimeout(() => {
-      this.movementWatchdogTimer = null;
-      this.expireMovementLeases();
-      this.armMovementWatchdog();
-    }, Math.max(0, expiresAt - this.now()));
-  }
-
-  private expireMovementLeases(): void {
-    if (this.movementLeases.expire(this.now())) {
-      this.syncMovementControls();
-    }
-  }
-
-  private stopMovementWatchdog(): void {
-    if (this.movementWatchdogTimer) clearTimeout(this.movementWatchdogTimer);
-    this.movementWatchdogTimer = null;
   }
 
   private currentBossBars(filterSuppressed = true): BossBarSummary[] {
