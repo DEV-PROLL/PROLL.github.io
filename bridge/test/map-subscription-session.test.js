@@ -119,7 +119,7 @@ test("initial frame is immediate and unchanged polls do not resample", async () 
   assert.equal(fixture.pollIntervalMs(), 2_000);
 });
 
-test("movement, heading, and dirty loaded changes sample at most once per poll", async () => {
+test("sampling uses exact four-block and thirty-degree success thresholds", async () => {
   // Given
   const fixture = sessionFixture();
   fixture.subscribe();
@@ -128,40 +128,126 @@ test("movement, heading, and dirty loaded changes sample at most once per poll",
   // When
   fixture.setNow(2_000);
   fixture.setSnapshot({
-    x: 1,
+    x: 3.999,
+    y: 64,
+    z: 0,
+    heading: 29.999,
+    dimension: "minecraft:overworld",
+  });
+  await fixture.poll();
+  assert.equal(fixture.sampleCount(), 1);
+
+  fixture.setNow(4_000);
+  fixture.setSnapshot({
+    x: 4,
     y: 64,
     z: 0,
     heading: 0,
     dimension: "minecraft:overworld",
   });
   await fixture.poll();
-  fixture.setNow(4_000);
-  fixture.setSnapshot({
-    x: 1,
-    y: 64,
-    z: 0,
-    heading: 3,
-    dimension: "minecraft:overworld",
-  });
-  await fixture.poll();
+  assert.equal(fixture.sampleCount(), 2);
+
   fixture.setNow(6_000);
   fixture.setSnapshot({
-    x: 1,
+    x: 4,
     y: 64,
     z: 0,
-    heading: 6,
+    heading: 29.999,
     dimension: "minecraft:overworld",
   });
   await fixture.poll();
+  assert.equal(fixture.sampleCount(), 2);
+
   fixture.setNow(8_000);
+  fixture.setSnapshot({
+    x: 4,
+    y: 64,
+    z: 0,
+    heading: 30,
+    dimension: "minecraft:overworld",
+  });
+  await fixture.poll();
+  assert.equal(fixture.sampleCount(), 3);
+
+  fixture.setNow(10_000);
+  fixture.setSnapshot({
+    x: 4,
+    y: 64,
+    z: 0,
+    heading: 1,
+    dimension: "minecraft:overworld",
+  });
+  await fixture.poll();
+  assert.equal(fixture.sampleCount(), 3);
+
+  fixture.setNow(12_000);
+  fixture.setSnapshot({
+    x: 4,
+    y: 64,
+    z: 0,
+    heading: 0,
+    dimension: "minecraft:overworld",
+  });
+  await fixture.poll();
+  assert.equal(fixture.sampleCount(), 4);
+
+  fixture.setNow(14_000);
   fixture.session.markDirty();
+  await fixture.poll();
+  assert.equal(fixture.sampleCount(), 5);
+
+  fixture.setNow(16_000);
+  fixture.setSnapshot({
+    x: 4,
+    y: 64,
+    z: 0,
+    heading: 0,
+    dimension: "minecraft:the_nether",
+  });
   await fixture.poll();
 
   // Then
-  assert.equal(fixture.sampleCount(), 4);
+  assert.equal(fixture.sampleCount(), 6);
   assert.equal(
     fixture.messages.filter(({ type }) => type === "map_frame").length,
-    4,
+    6,
+  );
+});
+
+test("failed sampling retains the last successful comparison snapshot", async () => {
+  // Given
+  const fixture = sessionFixture();
+  fixture.subscribe();
+  await until(() => fixture.sampleCount() === 1 ? true : undefined);
+  fixture.setLoadedColumns(0);
+
+  // When
+  fixture.setNow(2_000);
+  fixture.setSnapshot({
+    x: 4,
+    y: 64,
+    z: 0,
+    heading: 0,
+    dimension: "minecraft:overworld",
+  });
+  await fixture.poll();
+  fixture.setLoadedColumns(1);
+  fixture.setNow(4_000);
+  fixture.setSnapshot({
+    x: 7.9,
+    y: 64,
+    z: 0,
+    heading: 0,
+    dimension: "minecraft:overworld",
+  });
+  await fixture.poll();
+
+  // Then
+  assert.equal(fixture.sampleCount(), 3);
+  assert.equal(
+    fixture.messages.filter(({ type }) => type === "map_frame").length,
+    2,
   );
 });
 

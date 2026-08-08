@@ -1,8 +1,12 @@
 import type { ServerMessage } from "./types";
+import {
+  shouldSampleMap,
+  successfulMapSnapshot,
+  type SuccessfulMapSnapshot,
+} from "./map-sample-threshold";
 
 const MAP_FRAME_INTERVAL_MS = 2_000;
 const MAP_UNSUPPORTED_AFTER_MS = 5_000;
-const MAP_HEADING_STEP_DEGREES = 5;
 
 type MapFrameMessage = Extract<ServerMessage, { type: "map_frame" }>;
 type MapStateMessage = Extract<ServerMessage, { type: "map_state" }>;
@@ -39,7 +43,7 @@ interface MapSubscription {
   readonly listener: (message: MapFrameMessage | MapStateMessage) => void;
   readonly radius: number | undefined;
   readonly startedAt: number;
-  lastSignature: string;
+  lastSuccessfulSnapshot: SuccessfulMapSnapshot | null;
   lastStateSignature: string;
   hasFrame: boolean;
   controller: AbortController | null;
@@ -63,7 +67,7 @@ export class MapSubscriptionSession {
       listener,
       radius,
       startedAt: this.io.now(),
-      lastSignature: "",
+      lastSuccessfulSnapshot: null,
       lastStateSignature: "",
       hasFrame: false,
       controller: null,
@@ -100,7 +104,6 @@ export class MapSubscriptionSession {
     for (const [clientId, subscription] of this.subscriptions) {
       subscription.controller?.abort();
       subscription.controller = null;
-      subscription.lastSignature = "";
       this.emitState(clientId, subscription, "stale", reason);
     }
   }
@@ -153,9 +156,17 @@ export class MapSubscriptionSession {
     if (this.suspended || subscription.controller) return;
     const snapshot = this.io.snapshot();
     if (!snapshot) return;
-    const signature = this.snapshotSignature(snapshot);
-    if (!force && signature === subscription.lastSignature) return;
-    subscription.lastSignature = signature;
+    const dirtyRevision = this.dirtyRevision;
+    if (
+      !force &&
+      !shouldSampleMap(
+        snapshot,
+        subscription.lastSuccessfulSnapshot,
+        dirtyRevision,
+      )
+    ) {
+      return;
+    }
     const controller = new AbortController();
     subscription.controller = controller;
     try {
@@ -171,7 +182,6 @@ export class MapSubscriptionSession {
         return;
       }
       if (result.loadedColumns === 0) {
-        subscription.lastSignature = "";
         if (
           this.io.now() - subscription.startedAt >=
           MAP_UNSUPPORTED_AFTER_MS
@@ -187,10 +197,13 @@ export class MapSubscriptionSession {
       }
       this.emitState(clientId, subscription, "live");
       this.deliver(clientId, subscription, result.frame);
+      subscription.lastSuccessfulSnapshot = successfulMapSnapshot(
+        snapshot,
+        dirtyRevision,
+      );
       subscription.hasFrame = true;
     } catch (error) {
       if (controller.signal.aborted) return;
-      subscription.lastSignature = "";
       this.emitState(
         clientId,
         subscription,
@@ -202,19 +215,6 @@ export class MapSubscriptionSession {
         subscription.controller = null;
       }
     }
-  }
-
-  private snapshotSignature(snapshot: MapSourceSnapshot): string {
-    const heading =
-      ((Math.floor(snapshot.heading) % 360) + 360) % 360;
-    return [
-      Math.floor(snapshot.x),
-      Math.floor(snapshot.y),
-      Math.floor(snapshot.z),
-      Math.floor(heading / MAP_HEADING_STEP_DEGREES),
-      snapshot.dimension,
-      this.dirtyRevision,
-    ].join(":");
   }
 
   private emitState(

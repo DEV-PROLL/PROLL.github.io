@@ -26,6 +26,7 @@ export * from "./map-sampler-contract";
 const DIMENSION_MAX_LENGTH = 128;
 const LOCAL_SCAN_ABOVE = 48;
 const LOCAL_SCAN_BELOW = 64;
+const MAP_SLICE_YIELD_TARGET_MS = MAP_SLICE_MAX_MS - 1;
 
 /** Mutable counters and fixed buffer for one in-progress frame only. */
 type SamplingContext = {
@@ -186,7 +187,7 @@ async function scanRange(
 async function yieldIfNeeded(context: SamplingContext): Promise<void> {
   throwIfCancelled(context.request.signal);
   const elapsed = context.runtime.clock.now() - context.sliceStartedAt;
-  if (elapsed < MAP_SLICE_MAX_MS) return;
+  if (elapsed < MAP_SLICE_YIELD_TARGET_MS) return;
   context.maxSliceMs = Math.max(context.maxSliceMs, elapsed);
   await context.runtime.scheduler.yield();
   context.yields += 1;

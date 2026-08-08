@@ -69,7 +69,7 @@ test("cancels sampling at a deterministic slice boundary", async () => {
 
   // Then
   await assert.rejects(sampling, MapSamplingCancelledError);
-  assert.equal(reads, MAP_SLICE_MAX_MS);
+  assert.equal(reads, MAP_SLICE_MAX_MS - 1);
 });
 
 test("cuts off exactly at the completed-frame block-read budget", async () => {
@@ -95,13 +95,13 @@ test("cuts off exactly at the completed-frame block-read budget", async () => {
   assert.equal(cells.at(-1), 0);
 });
 
-test("yields before injected work exceeds five milliseconds", async () => {
+test("yields with headroom before the exported five millisecond cap", async () => {
   // Given
   let now = 0;
   const sliceDurations = [];
   let sliceStartedAt = 0;
   const adapter = deepSurfaceAdapter(() => {
-    now += 1;
+    now += 0.25;
   });
   const runtime = {
     clock: { now: () => now },
@@ -122,13 +122,14 @@ test("yields before injected work exceeds five milliseconds", async () => {
   sliceDurations.push(now - sliceStartedAt);
 
   // Then
+  assert.equal(MAP_SLICE_MAX_MS, 5);
   assert.ok(sliceDurations.length > 1);
   assert.equal(
-    sliceDurations.every((duration) => duration <= MAP_SLICE_MAX_MS),
+    sliceDurations.every((duration) => duration < MAP_SLICE_MAX_MS),
     true,
   );
   assert.ok(frame.stats.yields > 0);
-  assert.ok(frame.stats.maxSliceMs <= MAP_SLICE_MAX_MS);
+  assert.ok(frame.stats.maxSliceMs < MAP_SLICE_MAX_MS);
 });
 
 test("repeated frames retain no growing sampler state", async () => {
