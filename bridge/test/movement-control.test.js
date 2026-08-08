@@ -449,12 +449,11 @@ test("heartbeats unchanged connected positions without delaying movement", (t) =
   const { bot, session, setNow } = diagnosticSession();
   t.after(() => session.shutdown("test complete"));
   const positions = [];
-  session.on("message", (message) => {
-    if (message.type === "position") positions.push(message);
+  session.startPositionSubscriptionForClient("phone", (message) => {
+    positions.push(message);
   });
 
   // When
-  session.emitPosition(true);
   for (const now of [10_250, 10_500, 10_750]) {
     setNow(now);
     session.emitPosition();
@@ -474,6 +473,129 @@ test("heartbeats unchanged connected positions without delaying movement", (t) =
       { x: 1, y: 64, z: 0, ts: 11_250 },
     ],
   );
+});
+
+test("position subscriptions isolate clients and emit immediately", (t) => {
+  // Given
+  const { bot, session, setNow } = diagnosticSession();
+  t.after(() => session.shutdown("test complete"));
+  const phone = [];
+  const tablet = [];
+
+  // When
+  session.startPositionSubscriptionForClient("phone", (message) => phone.push(message));
+  setNow(10_500);
+  session.startPositionSubscriptionForClient("tablet", (message) => tablet.push(message));
+  setNow(10_750);
+  bot.entity.position = { x: 1, y: 64, z: 0 };
+  session.emitPosition();
+  session.stopPositionSubscriptionForClient("phone");
+  setNow(11_000);
+  bot.entity.position = { x: 2, y: 64, z: 0 };
+  session.emitPosition();
+
+  // Then
+  assert.deepEqual(phone.map(({ x, ts }) => ({ x, ts })), [
+    { x: 0, ts: 10_000 },
+    { x: 1, ts: 10_750 },
+  ]);
+  assert.deepEqual(tablet.map(({ x, ts }) => ({ x, ts })), [
+    { x: 0, ts: 10_500 },
+    { x: 1, ts: 10_750 },
+    { x: 2, ts: 11_000 },
+  ]);
+  assert.equal(session.positionSubscriberCount(), 1);
+});
+
+test("one failed position listener does not block another client", (t) => {
+  // Given
+  const { bot, session, setNow } = diagnosticSession();
+  t.after(() => session.shutdown("test complete"));
+  const originalConsoleError = console.error;
+  const loggedErrors = [];
+  console.error = (...args) => loggedErrors.push(args);
+  t.after(() => {
+    console.error = originalConsoleError;
+  });
+  const tablet = [];
+  session.startPositionSubscriptionForClient("phone", (message) => {
+    if (message.x > 0) throw new Error("closed client");
+  });
+  session.startPositionSubscriptionForClient("tablet", (message) => tablet.push(message));
+
+  // When
+  setNow(10_250);
+  bot.entity.position = { x: 1, y: 64, z: 0 };
+  session.emitPosition();
+
+  // Then
+  assert.deepEqual(tablet.map(({ x, ts }) => ({ x, ts })), [
+    { x: 0, ts: 10_000 },
+    { x: 1, ts: 10_250 },
+  ]);
+  assert.equal(session.positionSubscriberCount(), 1);
+  assert.equal(session.isPositionSyncActive(), true);
+  assert.equal(loggedErrors.length, 1);
+});
+
+test("position heartbeats are tracked independently per client", (t) => {
+  // Given
+  const { session, setNow } = diagnosticSession();
+  t.after(() => session.shutdown("test complete"));
+  const phone = [];
+  const tablet = [];
+  session.startPositionSubscriptionForClient("phone", (message) => phone.push(message));
+  setNow(10_500);
+  session.startPositionSubscriptionForClient("tablet", (message) => tablet.push(message));
+
+  // When
+  setNow(11_000);
+  session.emitPosition();
+  setNow(11_500);
+  session.emitPosition();
+
+  // Then
+  assert.deepEqual(phone.map(({ ts }) => ts), [10_000, 11_000]);
+  assert.deepEqual(tablet.map(({ ts }) => ts), [10_500, 11_500]);
+});
+
+test("position sync timer exists only while at least one client subscribes", (t) => {
+  // Given
+  const { session } = diagnosticSession();
+  t.after(() => session.shutdown("test complete"));
+
+  // When / Then
+  assert.equal(session.positionSubscriberCount(), 0);
+  assert.equal(session.isPositionSyncActive(), false);
+
+  session.startPositionSubscriptionForClient("phone", () => {});
+  assert.equal(session.positionSubscriberCount(), 1);
+  assert.equal(session.isPositionSyncActive(), true);
+
+  session.startPositionSubscriptionForClient("tablet", () => {});
+  session.stopPositionSubscriptionForClient("phone");
+  assert.equal(session.positionSubscriberCount(), 1);
+  assert.equal(session.isPositionSyncActive(), true);
+
+  session.stopPositionSubscriptionForClient("tablet");
+  assert.equal(session.positionSubscriberCount(), 0);
+  assert.equal(session.isPositionSyncActive(), false);
+});
+
+test("kick immediately clears movement and position subscriptions", (t) => {
+  // Given
+  const { bot, session } = diagnosticSession();
+  t.after(() => session.shutdown("test complete"));
+  session.startPositionSubscriptionForClient("phone", () => {});
+  session.setMovementControl("phone", "forward", true, 1_500);
+
+  // When
+  bot.emit("kicked", "test kick");
+
+  // Then
+  assert.equal(session.isMovementActive(), false);
+  assert.equal(session.positionSubscriberCount(), 0);
+  assert.equal(session.isPositionSyncActive(), false);
 });
 
 test("maps Mineflayer yaw from north through its right-handed rotation", () => {

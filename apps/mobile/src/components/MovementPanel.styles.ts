@@ -1,5 +1,16 @@
-import { StyleSheet } from "react-native";
+import { Platform, StyleSheet } from "react-native";
+import type { ViewStyle } from "react-native";
 import { theme } from "../theme";
+
+export const webHoldSafeStyle: ViewStyle =
+  Platform.OS === "web"
+    ? ({
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
+        touchAction: "none",
+      } as unknown as ViewStyle)
+    : {};
 
 export const styles = StyleSheet.create({
   panel: {

@@ -298,6 +298,7 @@ export function startWsServer(
 
     ws.on("close", () => {
       state.mcSession?.stopMovementForClient(state.sessionKey);
+      state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
       movementRateGate.clear(state.sessionKey);
       stats.activeWs = Math.max(0, stats.activeWs - 1);
       if (state.authenticatedUserId) {
@@ -315,6 +316,7 @@ export function startWsServer(
     ws.on("error", () => {
       // Mirror close cleanup; ws will fire 'close' too but be defensive.
       state.mcSession?.stopMovementForClient(state.sessionKey);
+      state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
       movementRateGate.clear(state.sessionKey);
       if (state.sessionId && state.listener) {
         sessions.detach(state.sessionId, state.listener);
@@ -1353,6 +1355,20 @@ async function handleMessage(
       return;
     }
 
+    case "position_subscribe": {
+      if (!state.mcSession) {
+        send({ type: "error", text: "not authenticated" });
+        return;
+      }
+      state.mcSession.startPositionSubscriptionForClient(state.sessionKey, send);
+      return;
+    }
+
+    case "position_unsubscribe": {
+      state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
+      return;
+    }
+
     case "forget_account": {
       const userId = msg.userId.trim();
       if (!userId) {
@@ -1361,6 +1377,7 @@ async function handleMessage(
       }
       if (state.sessionId && state.listener) {
         state.mcSession?.stopMovementForClient(state.sessionKey);
+        state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
         sessions.detach(state.sessionId, state.listener);
         state.listener = null;
         state.mcSession = null;
@@ -1380,6 +1397,7 @@ async function handleMessage(
     case "logout": {
       if (state.sessionId && state.listener) {
         state.mcSession?.stopMovementForClient(state.sessionKey);
+        state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
         sessions.detach(state.sessionId, state.listener);
         sessions.forceClose(state.sessionId);
         state.listener = null;
@@ -1531,6 +1549,7 @@ function attachToSession(
 function detachClientSession(state: ClientState, sessions: SessionManager): void {
   if (!state.sessionId || !state.listener) return;
   state.mcSession?.stopMovementForClient(state.sessionKey);
+  state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
   sessions.detach(state.sessionId, state.listener);
   state.listener = null;
   state.mcSession = null;

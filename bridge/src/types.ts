@@ -20,6 +20,8 @@ export type ClientMessage =
       holdMs?: number;
     }
   | { type: "movement_stop_all" }
+  | { type: "position_subscribe" }
+  | { type: "position_unsubscribe" }
   | { type: "forget_account"; userId: string }
   | { type: "logout" }
   | { type: "ping" };

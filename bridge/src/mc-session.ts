@@ -40,6 +40,12 @@ type PlayerStateMessage = Extract<ServerMessage, { type: "player_state" }>;
 type PositionMessage = Extract<ServerMessage, { type: "position" }>;
 type SerializedLoreLine = { text: string; segments?: ChatSegment[] };
 
+interface PositionSubscription {
+  listener: (message: PositionMessage) => void;
+  lastSignature: string;
+  lastEmittedAt?: number;
+}
+
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
 const POSITION_SYNC_MS = 250;
 const POSITION_HEARTBEAT_MS = 1_000;
@@ -155,10 +161,9 @@ export class McSession extends EventEmitter {
   private lastPlayerListSignature = "";
   private lastBossBarsSignature = "";
   private lastPlayerStateSignature = "";
-  private lastPositionSignature = "";
-  private lastPositionEmittedAt: number | undefined;
   private readonly suppressedBossBarIds = new Set<string>();
   private readonly movementLeases = new MovementLeaseBook();
+  private readonly positionSubscriptions = new Map<string, PositionSubscription>();
   private positionTimer: NodeJS.Timeout | null = null;
   private movementWatchdogTimer: NodeJS.Timeout | null = null;
   private movementEpoch = 0;
@@ -415,6 +420,8 @@ export class McSession extends EventEmitter {
     bot.on("kicked", (reason: unknown) => {
       const normalized = normalizeKickReason(reason);
       console.warn(`[mc-session] kicked reason=${normalized}`);
+      this.stopAllMovement();
+      this.clearPositionSubscriptions();
       this.emitMsg({
         type: "kicked",
         reason: normalized,
@@ -852,14 +859,13 @@ export class McSession extends EventEmitter {
     this.shuttingDown = true;
     this.stopAntiAfk();
     this.stopAllMovement();
-    this.stopPositionSync();
+    this.clearPositionSubscriptions();
     this.clearConfigurationRestartWatchdog();
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
     this.stopPlayerListSync();
     this.lastBossBarsSignature = "";
     this.lastPlayerStateSignature = "";
-    this.lastPositionSignature = "";
     this.suppressedBossBarIds.clear();
     const bot = this.bot;
     this.bot = null;
@@ -879,14 +885,13 @@ export class McSession extends EventEmitter {
     console.warn(`[mc-session] ended reason=${normalizedReason}`);
     this.stopAntiAfk();
     this.stopAllMovement();
-    this.stopPositionSync();
+    this.clearPositionSubscriptions();
     this.clearConfigurationRestartWatchdog();
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
     this.stopPlayerListSync();
     this.lastBossBarsSignature = "";
     this.lastPlayerStateSignature = "";
-    this.lastPositionSignature = "";
     this.suppressedBossBarIds.clear();
     this.connected = false;
     const bot = this.bot;
@@ -1091,22 +1096,84 @@ export class McSession extends EventEmitter {
     };
   }
 
+  startPositionSubscriptionForClient(
+    clientId: string,
+    listener: (message: PositionMessage) => void,
+  ): void {
+    const existing = this.positionSubscriptions.get(clientId);
+    if (existing) {
+      existing.listener = listener;
+      return;
+    }
+    const subscription: PositionSubscription = {
+      listener,
+      lastSignature: "",
+    };
+    this.positionSubscriptions.set(clientId, subscription);
+    this.startPositionSync();
+    const message = this.positionSnapshot();
+    if (message) {
+      this.deliverPosition(clientId, subscription, message, true);
+    }
+  }
+
+  stopPositionSubscriptionForClient(clientId: string): void {
+    if (!this.positionSubscriptions.delete(clientId)) return;
+    if (this.positionSubscriptions.size === 0) this.stopPositionSync();
+  }
+
+  positionSubscriberCount(): number {
+    return this.positionSubscriptions.size;
+  }
+
+  isPositionSyncActive(): boolean {
+    return this.positionTimer != null;
+  }
+
   private startPositionSync(): void {
-    this.stopPositionSync();
+    if (this.positionTimer || this.positionSubscriptions.size === 0) return;
     this.positionTimer = setInterval(() => this.emitPosition(), POSITION_SYNC_MS);
   }
 
   private stopPositionSync(): void {
     if (this.positionTimer) clearInterval(this.positionTimer);
     this.positionTimer = null;
-    this.lastPositionSignature = "";
-    this.lastPositionEmittedAt = undefined;
+  }
+
+  private clearPositionSubscriptions(): void {
+    this.positionSubscriptions.clear();
+    this.stopPositionSync();
   }
 
   private emitPosition(force = false): void {
     const msg = this.positionSnapshot();
     if (!msg) return;
     this.recordPositionSample(msg);
+    for (const [clientId, subscription] of this.positionSubscriptions) {
+      this.deliverPosition(clientId, subscription, msg, force);
+    }
+  }
+
+  private deliverPosition(
+    clientId: string,
+    subscription: PositionSubscription,
+    msg: PositionMessage,
+    force: boolean,
+  ): void {
+    try {
+      this.emitPositionToSubscription(subscription, msg, force);
+    } catch (error) {
+      console.error("[mc-session] position subscriber failed", error);
+      this.positionSubscriptions.delete(clientId);
+      if (this.positionSubscriptions.size === 0) this.stopPositionSync();
+    }
+  }
+
+  private emitPositionToSubscription(
+    subscription: PositionSubscription,
+    msg: PositionMessage,
+    force: boolean,
+  ): void {
     const signature = [
       msg.x.toFixed(3),
       msg.y.toFixed(3),
@@ -1116,18 +1183,18 @@ export class McSession extends EventEmitter {
       msg.grounded ?? "",
     ].join(":");
     const heartbeatDue =
-      this.lastPositionEmittedAt == null ||
-      msg.ts - this.lastPositionEmittedAt >= POSITION_HEARTBEAT_MS;
+      subscription.lastEmittedAt == null ||
+      msg.ts - subscription.lastEmittedAt >= POSITION_HEARTBEAT_MS;
     if (
       !force &&
-      signature === this.lastPositionSignature &&
+      signature === subscription.lastSignature &&
       !heartbeatDue
     ) {
       return;
     }
-    this.lastPositionSignature = signature;
-    this.lastPositionEmittedAt = msg.ts;
-    this.emitMsg(msg);
+    subscription.lastSignature = signature;
+    subscription.lastEmittedAt = msg.ts;
+    subscription.listener(msg);
   }
 
   private syncMovementControls(): void {

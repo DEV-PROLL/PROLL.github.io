@@ -32,7 +32,6 @@ import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
 import { MinecraftItemIcon } from "../components/MinecraftItemIcon";
 import { MovementPanel } from "../components/MovementPanel";
-import { PositionCompass } from "../components/PositionCompass";
 import { MOVEMENT_PANEL_ENABLED, MOVEMENT_TEST_IGN } from "../appConfig";
 
 interface Props {
@@ -156,6 +155,13 @@ export function ChatScreen({
   const titleTimingRef = useRef<TitleTimingState>(DEFAULT_TITLE_TIMING);
   const autoReconnectAttemptRef = useRef(0);
   const lastAuthAttemptAtRef = useRef(0);
+  const movementOpenRef = useRef(false);
+
+  const resetMovementPanel = useCallback(() => {
+    movementOpenRef.current = false;
+    setMovementOpen(false);
+    setPosition(null);
+  }, []);
 
   useEffect(() => {
     latestInputRef.current = input;
@@ -252,8 +258,7 @@ export function ChatScreen({
             setPlayerList([]);
             setBossBars([]);
             setPlayerVitals(null);
-            setPosition(null);
-            setMovementOpen(false);
+            resetMovementPanel();
             clearTransientOverlays();
           }
           if (msg.connected) {
@@ -299,6 +304,7 @@ export function ChatScreen({
           });
           break;
         case "position":
+          if (!movementOpenRef.current) break;
           setPosition({
             x: msg.x,
             y: msg.y,
@@ -389,8 +395,7 @@ export function ChatScreen({
           setPlayerList([]);
           setBossBars([]);
           setPlayerVitals(null);
-          setPosition(null);
-          setMovementOpen(false);
+          resetMovementPanel();
           clearTransientOverlays();
           setMessages((prev) => [
             ...prev,
@@ -463,7 +468,13 @@ export function ChatScreen({
           break;
       }
     },
-    [clearAutoReconnectTimer, clearTransientOverlays, onLogout, userId],
+    [
+      clearAutoReconnectTimer,
+      clearTransientOverlays,
+      onLogout,
+      resetMovementPanel,
+      userId,
+    ],
   );
 
   const { state, send } = useBridge(bridgeUrl, true, handleMessage);
@@ -565,6 +576,10 @@ export function ChatScreen({
       reconnect();
     }
   }, [state, reconnect]);
+
+  useEffect(() => {
+    if (state !== "open") resetMovementPanel();
+  }, [resetMovementPanel, state]);
 
   useEffect(() => {
     if (state !== "open" || serverInfo.connected || serverInfo.phase === "joining") return;
@@ -728,16 +743,19 @@ export function ChatScreen({
 
   const handleExitServer = () => {
     setOverflowOpen(false);
-    setMovementOpen(false);
+    resetMovementPanel();
     send({ type: "movement_stop_all" });
+    send({ type: "position_unsubscribe" });
     send({ type: "logout" });
     onLogout();
   };
 
   const closeMovement = useCallback(() => {
+    movementOpenRef.current = false;
     send({ type: "movement_stop_all" });
-    setMovementOpen(false);
-  }, [send]);
+    send({ type: "position_unsubscribe" });
+    resetMovementPanel();
+  }, [resetMovementPanel, send]);
 
   const handlePlayerSelect = (player: PlayerSummary) => {
     const whisper = `/귓 ${player.name} `;
@@ -813,7 +831,6 @@ export function ChatScreen({
         </View>
 
         {playerVitals ? <VitalsStrip vitals={playerVitals} /> : null}
-        <PositionCompass connected={serverInfo.connected} position={position} />
         {bossBars.length > 0 ? <BossBarStack bars={bossBars} /> : null}
         {titleOverlay ? <TitleOverlay overlay={titleOverlay} /> : null}
         {actionBar ? (
@@ -974,6 +991,8 @@ export function ChatScreen({
           movementAllowed={movementAllowed}
           onOpenMovement={() => {
             setOverflowOpen(false);
+            movementOpenRef.current = true;
+            setPosition(null);
             setMovementOpen(true);
           }}
           onExitServer={handleExitServer}
@@ -981,9 +1000,10 @@ export function ChatScreen({
 
         {movementOpen && movementAllowed ? (
           <MovementModal
-            connected={serverInfo.connected}
+            connected={state === "open" && serverInfo.connected}
             position={position}
             send={send}
+            onPositionReset={() => setPosition(null)}
             onClose={closeMovement}
           />
         ) : null}
@@ -1739,11 +1759,13 @@ function MovementModal({
   connected,
   position,
   send,
+  onPositionReset,
   onClose,
 }: {
   connected: boolean;
   position: PlayerPosition | null;
   send: ReturnType<typeof useBridge>["send"];
+  onPositionReset: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1768,7 +1790,13 @@ function MovementModal({
               <Text style={styles.movementCloseText}>×</Text>
             </Pressable>
           </View>
-          <MovementPanel connected={connected} position={position} send={send} enabled />
+          <MovementPanel
+            connected={connected}
+            position={position}
+            send={send}
+            onPositionReset={onPositionReset}
+            enabled
+          />
         </View>
       </View>
     </Modal>
