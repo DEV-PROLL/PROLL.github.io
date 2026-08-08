@@ -44,6 +44,24 @@ test("raw palette indices decode into exact RGBA canvas pixels", () => {
   ]);
 });
 
+test("renders the transparent RGBA palette entry used by live map frames", () => {
+  // Given
+  const frame = mapFrame({
+    palette: ["#00000000", "#11223380", "#abcdef"],
+  });
+
+  // When
+  const rgba = mapFrameRgba(frame);
+
+  // Then
+  assert.deepEqual([...rgba], [
+    0, 0, 0, 0,
+    17, 34, 51, 128,
+    171, 205, 239, 255,
+    17, 34, 51, 128,
+  ]);
+});
+
 test("invalid dimensions and palette indices are rejected at the frame boundary", () => {
   // Given
   const oversized = mapFrame({ cols: 66, rows: 1 });

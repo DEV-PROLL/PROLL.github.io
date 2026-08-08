@@ -1,7 +1,7 @@
 import type { MapFrame, MapStateMessage } from "./protocol";
 
 const MAP_MAX_SIDE = 65;
-const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+const HEX_COLOR = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i;
 
 export interface MapViewState {
   readonly state: MapStateMessage["state"];
@@ -95,7 +95,7 @@ export function mapFrameRgba(frame: MapFrame): Uint8ClampedArray {
     rgba[offset] = color.red;
     rgba[offset + 1] = color.green;
     rgba[offset + 2] = color.blue;
-    rgba[offset + 3] = 255;
+    rgba[offset + 3] = color.alpha;
   });
   return rgba;
 }
@@ -104,11 +104,13 @@ function parseHexColor(value: string): {
   readonly red: number;
   readonly green: number;
   readonly blue: number;
+  readonly alpha: number;
 } {
   if (!HEX_COLOR.test(value)) throw new Error("invalid map palette color");
   return {
     red: Number.parseInt(value.slice(1, 3), 16),
     green: Number.parseInt(value.slice(3, 5), 16),
     blue: Number.parseInt(value.slice(5, 7), 16),
+    alpha: value.length === 9 ? Number.parseInt(value.slice(7, 9), 16) : 255,
   };
 }
