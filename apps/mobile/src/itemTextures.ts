@@ -1,5 +1,18 @@
 export const DEFAULT_MINECRAFT_ASSETS_BASE_URL =
   "https://raw.githubusercontent.com/PrismarineJS/minecraft-assets/master";
+const PLAYER_HEAD_TEXTURE_BASE_URL = "https://textures.minecraft.net/texture";
+const MC_HEADS_AVATAR_BASE_URL = "https://mc-heads.net/avatar";
+
+export interface PlayerHeadMetadata {
+  readonly playerUuid?: string;
+  readonly playerName?: string;
+  readonly textureId?: string;
+}
+
+export interface PlayerHeadTextureTier {
+  readonly kind: "skin" | "avatar";
+  readonly url: string;
+}
 
 declare global {
   var __MINECRAFT_ASSETS_BASE_URL__: string | undefined;
@@ -45,6 +58,21 @@ export function minecraftAssetVersion(mcVersion: string): string | null {
   return ASSET_VERSION_OVERRIDES[version] ?? version;
 }
 
+export function minecraftSkinAspectRatio(
+  sourceWidth: number,
+  sourceHeight: number,
+): 0.5 | 1 {
+  return (
+    Number.isFinite(sourceWidth) &&
+    Number.isFinite(sourceHeight) &&
+    sourceWidth > 0 &&
+    sourceHeight > 0 &&
+    sourceHeight * 2 === sourceWidth
+  )
+    ? 0.5
+    : 1;
+}
+
 export function minecraftTextureUrls(
   baseUrl: string,
   mcVersion: string,
@@ -60,6 +88,42 @@ export function minecraftTextureUrls(
     `${textureRoot}/items/${normalizedName}.png`,
     `${textureRoot}/blocks/${normalizedName}.png`,
   ];
+}
+
+export function isValidTextureId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{40,64}$/.test(value);
+}
+
+export function headTextureUrl(textureId: unknown): string | null {
+  return isValidTextureId(textureId)
+    ? `${PLAYER_HEAD_TEXTURE_BASE_URL}/${textureId}`
+    : null;
+}
+
+export function mcHeadsAvatarUrl(identifier: unknown): string | null {
+  if (typeof identifier !== "string") return null;
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      identifier,
+    );
+  const isPlayerName = /^[A-Za-z0-9_]{1,16}$/.test(identifier);
+  return isUuid || isPlayerName
+    ? `${MC_HEADS_AVATAR_BASE_URL}/${identifier}`
+    : null;
+}
+
+export function playerHeadTextureTiers(
+  head: PlayerHeadMetadata | null | undefined,
+): readonly PlayerHeadTextureTier[] {
+  if (!head) return [];
+  const tiers: PlayerHeadTextureTier[] = [];
+  const textureUrl = headTextureUrl(head.textureId);
+  const uuidUrl = mcHeadsAvatarUrl(head.playerUuid);
+  const nameUrl = mcHeadsAvatarUrl(head.playerName);
+  if (textureUrl) tiers.push({ kind: "skin", url: textureUrl });
+  if (uuidUrl) tiers.push({ kind: "avatar", url: uuidUrl });
+  if (nameUrl) tiers.push({ kind: "avatar", url: nameUrl });
+  return tiers;
 }
 
 const runtimeAssetsBaseUrl =

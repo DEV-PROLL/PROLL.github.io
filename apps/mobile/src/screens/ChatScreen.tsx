@@ -1523,6 +1523,7 @@ function GuiWindowModal({
                     key={`${mcVersion}-${detailItem.name}`}
                     itemName={detailItem.name}
                     mcVersion={mcVersion}
+                    head={detailItem.head}
                     fallbackLabel={shortItemLabel(detailItem)}
                     fallbackColor={itemColor(detailItem.name)}
                     size={44}
@@ -1989,6 +1990,7 @@ function GuiSlotCell({
             key={`${mcVersion}-${item.name}`}
             itemName={item.name}
             mcVersion={mcVersion}
+            head={item.head}
             fallbackLabel={label}
             fallbackColor={itemColor(item.name)}
             size={24}

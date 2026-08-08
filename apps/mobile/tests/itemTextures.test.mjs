@@ -2,11 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_MINECRAFT_ASSETS_BASE_URL,
+  headTextureUrl,
+  isValidTextureId,
+  mcHeadsAvatarUrl,
   minecraftAssetVersion,
+  minecraftSkinAspectRatio,
   minecraftTextureUrls,
   normalizeMinecraftAssetName,
+  playerHeadTextureTiers,
   resolveMinecraftAssetsBaseUrl,
 } from "../src/itemTextures.ts";
+
+const TEXTURE_ID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const PLAYER_UUID = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
 
 test("uses the runtime asset base when configured", () => {
   // Given
@@ -108,4 +116,78 @@ test("does not build texture URLs for invalid resource inputs", () => {
   // Then
   assert.deepEqual(invalidName, []);
   assert.deepEqual(invalidVersion, []);
+});
+
+test("builds direct Mojang texture URLs only for validated ids", () => {
+  assert.equal(isValidTextureId(TEXTURE_ID), true);
+  assert.equal(
+    headTextureUrl(TEXTURE_ID),
+    `https://textures.minecraft.net/texture/${TEXTURE_ID}`,
+  );
+
+  for (const invalid of [
+    "../" + TEXTURE_ID,
+    TEXTURE_ID.toUpperCase(),
+    "0123456789abcdef",
+    `${TEXTURE_ID}/extra`,
+  ]) {
+    assert.equal(isValidTextureId(invalid), false);
+    assert.equal(headTextureUrl(invalid), null);
+  }
+});
+
+test("validates mc-heads avatar identifiers before constructing URLs", () => {
+  assert.equal(
+    mcHeadsAvatarUrl(PLAYER_UUID),
+    `https://mc-heads.net/avatar/${PLAYER_UUID}`,
+  );
+  assert.equal(
+    mcHeadsAvatarUrl("Dinnerbone"),
+    "https://mc-heads.net/avatar/Dinnerbone",
+  );
+  assert.equal(mcHeadsAvatarUrl("../player"), null);
+  assert.equal(mcHeadsAvatarUrl("name with spaces"), null);
+});
+
+test("selects direct texture then UUID and name avatar tiers", () => {
+  assert.deepEqual(
+    playerHeadTextureTiers({
+      textureId: TEXTURE_ID,
+      playerUuid: PLAYER_UUID,
+      playerName: "Dinnerbone",
+    }),
+    [
+      {
+        kind: "skin",
+        url: `https://textures.minecraft.net/texture/${TEXTURE_ID}`,
+      },
+      {
+        kind: "avatar",
+        url: `https://mc-heads.net/avatar/${PLAYER_UUID}`,
+      },
+      {
+        kind: "avatar",
+        url: "https://mc-heads.net/avatar/Dinnerbone",
+      },
+    ],
+  );
+});
+
+test("skips invalid player-head tiers without echoing hostile input", () => {
+  assert.deepEqual(
+    playerHeadTextureTiers({
+      textureId: "https://evil.example/texture/" + TEXTURE_ID,
+      playerUuid: "not-a-uuid",
+      playerName: "../admin",
+    }),
+    [],
+  );
+});
+
+test("preserves modern and legacy Minecraft skin aspect ratios", () => {
+  assert.equal(minecraftSkinAspectRatio(64, 64), 1);
+  assert.equal(minecraftSkinAspectRatio(64, 32), 0.5);
+  assert.equal(minecraftSkinAspectRatio(128, 64), 0.5);
+  assert.equal(minecraftSkinAspectRatio(0, 0), 1);
+  assert.equal(minecraftSkinAspectRatio(64, 48), 1);
 });

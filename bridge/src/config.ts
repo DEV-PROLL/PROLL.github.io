@@ -2,6 +2,8 @@ import path from "path";
 import type { BridgeConfig, BridgeServerProfile } from "./types";
 import { assertSupportedMcVersion } from "./mc-versions";
 
+export const HEAD_METADATA_ENABLED = process.env.HEAD_METADATA_ENABLED === "1";
+
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;

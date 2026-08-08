@@ -15,6 +15,14 @@ export const MOVEMENT_PANEL_ENABLED =
   // Initial private rollout cohort requested by the movement coordinator.
   movementFeature === "_pelol";
 
+const headRenderFeature =
+  typeof process !== "undefined"
+    ? process.env.EXPO_PUBLIC_HEAD_RENDER_ENABLED?.trim().toLowerCase()
+    : undefined;
+
+export const HEAD_RENDER_ENABLED =
+  headRenderFeature === "1" || headRenderFeature === "true";
+
 const movementTestIgn =
   typeof process !== "undefined"
     ? process.env.EXPO_PUBLIC_MOVEMENT_TEST_IGN?.trim()

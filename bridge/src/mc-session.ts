@@ -27,6 +27,7 @@ import {
   type MovementControl,
 } from "./movement-control";
 import { headingFromMineflayerYaw } from "./position-direction";
+import { HEAD_METADATA_ENABLED } from "./config";
 
 type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
 type BossBarsMessage = Extract<ServerMessage, { type: "boss_bars" }>;
@@ -1353,6 +1354,7 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
   const loreSegments = loreLines.map((line) => line.segments).some(Boolean)
     ? loreLines.map((line) => line.segments ?? [{ text: line.text }])
     : undefined;
+  const head = HEAD_METADATA_ENABLED ? extractHeadInfo(item) : undefined;
   debugGuiItem(item, displayName, lore);
   return {
     name: item.name,
@@ -1363,7 +1365,267 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
     metadata: item.metadata,
     lore: lore.length > 0 ? lore : undefined,
     loreSegments,
+    head,
   };
+}
+
+const MAX_ENCODED_HEAD_TEXTURE_BYTES = 8 * 1024;
+const PLAYER_NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
+const TEXTURE_ID_RE = /^[0-9a-f]{40,64}$/;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export function extractHeadInfo(
+  item: Item | null | undefined,
+): GuiItem["head"] | undefined {
+  try {
+    if (
+      !item ||
+      (item.name !== "player_head" && item.name !== "player_wall_head")
+    ) {
+      return undefined;
+    }
+
+    const profile = readHeadProfile(item) ?? readLegacySkullOwner(item);
+    const record = profileRecord(profile);
+    if (!record) return undefined;
+
+    const playerUuid = sanitizePlayerUuid(
+      firstField(record, ["uuid", "UUID", "id", "Id"]),
+    );
+    const playerName = sanitizePlayerName(
+      firstField(record, ["name", "Name"]),
+    );
+    const textureValue = texturePropertyValue(
+      firstField(record, ["properties", "Properties"]),
+    );
+    const textureId = textureValue
+      ? textureIdFromEncodedProfile(textureValue)
+      : undefined;
+
+    if (!playerUuid && !playerName && !textureId) return undefined;
+    return {
+      ...(playerUuid ? { playerUuid } : {}),
+      ...(playerName ? { playerName } : {}),
+      ...(textureId ? { textureId } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function readHeadProfile(item: Item): unknown {
+  const componentMap = (item as unknown as Record<string, unknown>).componentMap;
+  if (componentMap instanceof Map) {
+    for (const key of ["profile", "minecraft:profile"]) {
+      if (componentMap.has(key)) {
+        return componentPayload(componentMap.get(key));
+      }
+    }
+  }
+  return readItemComponent(item, ["minecraft:profile", "profile"]);
+}
+
+function readLegacySkullOwner(item: Item): unknown {
+  const root = unwrapNbtValue(
+    (item as unknown as Record<string, unknown>).nbt,
+  );
+  if (!root || typeof root !== "object" || root instanceof Map) {
+    return undefined;
+  }
+  const record = root as Record<string, unknown>;
+  return record.SkullOwner ?? record.skullOwner;
+}
+
+function profileRecord(value: unknown): Record<string, unknown> | undefined {
+  const normalized = unwrapNbtValue(value);
+  if (typeof normalized === "string") {
+    return { name: normalized };
+  }
+  if (!normalized || typeof normalized !== "object" || normalized instanceof Map) {
+    return undefined;
+  }
+
+  const root = normalized as Record<string, unknown>;
+  const candidates = [
+    root,
+    unwrapNbtValue(root.profile),
+    unwrapNbtValue(root.data),
+  ];
+  for (const candidate of candidates) {
+    if (
+      candidate &&
+      typeof candidate === "object" &&
+      !Array.isArray(candidate) &&
+      !(candidate instanceof Map)
+    ) {
+      const record = candidate as Record<string, unknown>;
+      if (
+        ["uuid", "UUID", "id", "Id", "name", "Name", "properties", "Properties"]
+          .some((key) => key in record)
+      ) {
+        return record;
+      }
+    }
+  }
+  return undefined;
+}
+
+function firstField(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): unknown {
+  for (const key of keys) {
+    if (key in record) return record[key];
+  }
+  return undefined;
+}
+
+function sanitizePlayerName(value: unknown): string | undefined {
+  const name = stringValue(value);
+  return name && PLAYER_NAME_RE.test(name) ? name : undefined;
+}
+
+function sanitizePlayerUuid(value: unknown): string | undefined {
+  const normalized = unwrapNbtValue(value);
+  let compact: string | undefined;
+
+  if (typeof normalized === "string") {
+    compact = normalized.trim().toLowerCase().replaceAll("-", "");
+  } else if (
+    Array.isArray(normalized) &&
+    normalized.length === 4 &&
+    normalized.every((part) => Number.isInteger(part))
+  ) {
+    compact = normalized
+      .map((part) => ((part as number) >>> 0).toString(16).padStart(8, "0"))
+      .join("");
+  } else if (normalized instanceof Uint8Array && normalized.length === 16) {
+    compact = Buffer.from(normalized).toString("hex");
+  }
+
+  if (!compact || !/^[0-9a-f]{32}$/.test(compact)) return undefined;
+  const dashed = [
+    compact.slice(0, 8),
+    compact.slice(8, 12),
+    compact.slice(12, 16),
+    compact.slice(16, 20),
+    compact.slice(20),
+  ].join("-");
+  return UUID_RE.test(dashed) ? dashed : undefined;
+}
+
+function texturePropertyValue(properties: unknown): string | undefined {
+  const normalized = unwrapNbtValue(properties);
+  if (Array.isArray(normalized)) {
+    for (const entry of normalized) {
+      const record = propertyRecord(entry);
+      if (!record) continue;
+      const name = stringValue(record.name ?? record.Name);
+      if (name !== "textures") continue;
+      const value = stringValue(record.value ?? record.Value);
+      if (value) return value;
+    }
+    return undefined;
+  }
+
+  if (
+    normalized &&
+    typeof normalized === "object" &&
+    !(normalized instanceof Map)
+  ) {
+    const record = normalized as Record<string, unknown>;
+    const textures = record.textures ?? record.Textures;
+    return firstStringValue(textures);
+  }
+  return undefined;
+}
+
+function propertyRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || value instanceof Map) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  if ("name" in raw || "Name" in raw || "Value" in raw) return raw;
+  const normalized = unwrapNbtValue(value);
+  return normalized &&
+    typeof normalized === "object" &&
+    !Array.isArray(normalized) &&
+    !(normalized instanceof Map)
+    ? (normalized as Record<string, unknown>)
+    : undefined;
+}
+
+function firstStringValue(value: unknown): string | undefined {
+  const pending = [value];
+  const visited = new Set<object>();
+  for (let count = 0; pending.length > 0 && count < 32; count += 1) {
+    const current = pending.shift();
+    const direct = stringValue(current);
+    if (direct) return direct;
+    const normalized = unwrapNbtValue(current);
+    if (!normalized || typeof normalized !== "object") continue;
+    if (visited.has(normalized)) continue;
+    visited.add(normalized);
+    if (Array.isArray(normalized)) {
+      pending.push(...normalized);
+      continue;
+    }
+    if (normalized instanceof Map) {
+      pending.push(...normalized.values());
+      continue;
+    }
+    const record = normalized as Record<string, unknown>;
+    pending.push(record.Value, record.value);
+  }
+  return undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  const normalized = unwrapNbtValue(value);
+  return typeof normalized === "string" && normalized.length > 0
+    ? normalized
+    : undefined;
+}
+
+function textureIdFromEncodedProfile(encoded: string): string | undefined {
+  if (
+    encoded.length === 0 ||
+    encoded.length > MAX_ENCODED_HEAD_TEXTURE_BYTES ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)
+  ) {
+    return undefined;
+  }
+
+  try {
+    const decoded = Buffer.from(encoded, "base64");
+    const canonical = decoded.toString("base64").replace(/=+$/, "");
+    if (canonical !== encoded.replace(/=+$/, "")) return undefined;
+    const payload = JSON.parse(decoded.toString("utf8")) as unknown;
+    if (!payload || typeof payload !== "object") return undefined;
+    const textures = (payload as Record<string, unknown>).textures;
+    if (!textures || typeof textures !== "object") return undefined;
+    const skin = (textures as Record<string, unknown>).SKIN;
+    if (!skin || typeof skin !== "object") return undefined;
+    const urlValue = (skin as Record<string, unknown>).url;
+    if (typeof urlValue !== "string") return undefined;
+
+    const url = new URL(urlValue);
+    if (
+      url.protocol !== "https:" ||
+      url.host !== "textures.minecraft.net" ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      return undefined;
+    }
+    const match = /^\/texture\/([0-9a-f]{40,64})$/.exec(url.pathname);
+    return match && TEXTURE_ID_RE.test(match[1]) ? match[1] : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function debugGuiItem(item: Item, displayName: string, lore: string[]): void {

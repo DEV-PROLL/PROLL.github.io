@@ -185,6 +185,11 @@ export interface GuiItem {
   metadata?: number;
   lore?: string[];
   loreSegments?: ChatSegment[][];
+  head?: {
+    playerUuid?: string;
+    playerName?: string;
+    textureId?: string;
+  };
 }
 
 export interface BridgeServerProfile {
