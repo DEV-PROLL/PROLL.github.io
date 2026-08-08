@@ -36,7 +36,67 @@ type SerializedLoreLine = { text: string; segments?: ChatSegment[] };
 
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
 const POSITION_SYNC_MS = 250;
+const POSITION_SAMPLE_WINDOW_MS = 3_000;
+const POSITION_SAMPLE_LIMIT = 12;
 const debuggedGuiItems = new Set<string>();
+
+const MOVEMENT_EPOCH_EVENTS = [
+  "start_configuration",
+  "login",
+  "respawn",
+  "death",
+  "mount",
+] as const;
+const MOVEMENT_DIAGNOSTIC_EVENTS = [
+  ...MOVEMENT_EPOCH_EVENTS,
+  "forcedMove",
+] as const;
+
+type MovementEpochEvent = (typeof MOVEMENT_EPOCH_EVENTS)[number];
+export type MovementDiagnosticEvent = (typeof MOVEMENT_DIAGNOSTIC_EVENTS)[number];
+
+export interface MovementEventDiagnostic {
+  readonly count: number;
+  readonly lastAt?: number;
+}
+
+export interface MovementPositionSample {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly ts: number;
+}
+
+export interface MovementPositionDelta {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly distance: number;
+  readonly elapsedMs: number;
+}
+
+export interface MovementPositionDelta3s {
+  readonly from: MovementPositionSample;
+  readonly to: MovementPositionSample;
+  readonly delta: MovementPositionDelta;
+  readonly samples: readonly MovementPositionSample[];
+}
+
+export interface MovementDiagnostics {
+  readonly controls: MovementControl[];
+  readonly botControls: Record<MovementControl, boolean>;
+  readonly physicsEnabled: boolean;
+  readonly blockLoaded: boolean;
+  readonly gameMode?: string;
+  readonly velocity?: { readonly x: number; readonly y: number; readonly z: number };
+  readonly movementEpoch: number;
+  readonly teleportEpoch: number;
+  readonly epochEvents: Record<MovementDiagnosticEvent, MovementEventDiagnostic>;
+  readonly lastForcedMoveAt?: number;
+  readonly lastPhysicsTickAt?: number;
+  readonly loadedColumns: number;
+  readonly positionDelta3s?: MovementPositionDelta3s;
+}
 
 export interface McSessionOptions {
   host: string;
@@ -88,6 +148,22 @@ export class McSession extends EventEmitter {
   private readonly movementLeases = new MovementLeaseBook();
   private positionTimer: NodeJS.Timeout | null = null;
   private movementWatchdogTimer: NodeJS.Timeout | null = null;
+  private movementEpoch = 0;
+  private teleportEpoch = 0;
+  private readonly epochEvents: Record<
+    MovementDiagnosticEvent,
+    MovementEventDiagnostic
+  > = {
+    start_configuration: { count: 0 },
+    login: { count: 0 },
+    respawn: { count: 0 },
+    death: { count: 0 },
+    mount: { count: 0 },
+    forcedMove: { count: 0 },
+  };
+  private lastForcedMoveAt: number | undefined;
+  private lastPhysicsTickAt: number | undefined;
+  private readonly movementPositionSamples: MovementPositionSample[] = [];
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
@@ -95,7 +171,10 @@ export class McSession extends EventEmitter {
   private packetActivityTimer: NodeJS.Timeout | null = null;
   private lastInboundPacketAt = 0;
 
-  constructor(private readonly opts: McSessionOptions) {
+  constructor(
+    private readonly opts: McSessionOptions,
+    private readonly now: () => number = Date.now,
+  ) {
     super();
   }
 
@@ -189,9 +268,15 @@ export class McSession extends EventEmitter {
       this.emitPlayerState();
     });
     bot.on("physicsTick", () => {
+      this.lastPhysicsTickAt = this.now();
       const active = this.movementLeases.activeControls();
       if (active.size > 0) this.writeMovementInput(bot, active);
     });
+    bot.on("login", () => this.recordMovementEpoch("login"));
+    bot.on("respawn", () => this.recordMovementEpoch("respawn"));
+    bot.on("death", () => this.recordMovementEpoch("death"));
+    bot.on("mount", () => this.recordMovementEpoch("mount"));
+    bot.on("forcedMove", () => this.recordForcedMove());
 
     const emitBossBarsSoon = (bar?: { entityUUID?: string }) => {
       if (typeof bar?.entityUUID === "string") {
@@ -344,6 +429,7 @@ export class McSession extends EventEmitter {
     });
 
     client.on("start_configuration", () => {
+      this.recordMovementEpoch("start_configuration");
       dedupeProtocolOnceListeners(clientEmitter, [
         "select_known_packs",
         "code_of_conduct",
@@ -495,7 +581,7 @@ export class McSession extends EventEmitter {
       return { ok: false, reason: "not connected" };
     }
     if (pressed) {
-      this.movementLeases.press(clientId, control, holdMs, Date.now());
+      this.movementLeases.press(clientId, control, holdMs, this.now());
     } else {
       this.movementLeases.release(clientId, control);
     }
@@ -524,14 +610,7 @@ export class McSession extends EventEmitter {
     return this.movementLeases.activeClientCount();
   }
 
-  movementDiagnostics(): {
-    controls: MovementControl[];
-    botControls: Record<MovementControl, boolean>;
-    physicsEnabled: boolean;
-    blockLoaded: boolean;
-    gameMode?: string;
-    velocity?: { x: number; y: number; z: number };
-  } {
+  movementDiagnostics(): MovementDiagnostics {
     const bot = this.bot;
     const position = bot?.entity?.position;
     const velocity = bot?.entity?.velocity;
@@ -549,6 +628,79 @@ export class McSession extends EventEmitter {
       velocity: velocity
         ? { x: velocity.x, y: velocity.y, z: velocity.z }
         : undefined,
+      movementEpoch: this.movementEpoch,
+      teleportEpoch: this.teleportEpoch,
+      epochEvents: {
+        start_configuration: { ...this.epochEvents.start_configuration },
+        login: { ...this.epochEvents.login },
+        respawn: { ...this.epochEvents.respawn },
+        death: { ...this.epochEvents.death },
+        mount: { ...this.epochEvents.mount },
+        forcedMove: { ...this.epochEvents.forcedMove },
+      },
+      lastForcedMoveAt: this.lastForcedMoveAt,
+      lastPhysicsTickAt: this.lastPhysicsTickAt,
+      loadedColumns: bot ? bot.world.getColumns().length : 0,
+      positionDelta3s: this.positionDelta3s(),
+    };
+  }
+
+  private recordMovementEpoch(event: MovementEpochEvent): void {
+    const now = this.now();
+    this.movementEpoch += 1;
+    this.epochEvents[event] = {
+      count: this.epochEvents[event].count + 1,
+      lastAt: now,
+    };
+  }
+
+  private recordForcedMove(): void {
+    const now = this.now();
+    this.teleportEpoch = this.movementEpoch;
+    this.lastForcedMoveAt = now;
+    this.epochEvents.forcedMove = {
+      count: this.epochEvents.forcedMove.count + 1,
+      lastAt: now,
+    };
+  }
+
+  private recordPositionSample(position: PositionMessage): void {
+    this.movementPositionSamples.push({
+      x: position.x,
+      y: position.y,
+      z: position.z,
+      ts: position.ts,
+    });
+    const windowStart = position.ts - POSITION_SAMPLE_WINDOW_MS;
+    while (this.movementPositionSamples[0]?.ts < windowStart) {
+      this.movementPositionSamples.shift();
+    }
+    if (this.movementPositionSamples.length > POSITION_SAMPLE_LIMIT) {
+      this.movementPositionSamples.splice(
+        0,
+        this.movementPositionSamples.length - POSITION_SAMPLE_LIMIT,
+      );
+    }
+  }
+
+  private positionDelta3s(): MovementPositionDelta3s | undefined {
+    const from = this.movementPositionSamples[0];
+    const to = this.movementPositionSamples.at(-1);
+    if (!from || !to) return undefined;
+    const x = to.x - from.x;
+    const y = to.y - from.y;
+    const z = to.z - from.z;
+    return {
+      from: { ...from },
+      to: { ...to },
+      delta: {
+        x,
+        y,
+        z,
+        distance: Math.hypot(x, y, z),
+        elapsedMs: to.ts - from.ts,
+      },
+      samples: this.movementPositionSamples.map((sample) => ({ ...sample })),
     };
   }
 
@@ -861,7 +1013,7 @@ export class McSession extends EventEmitter {
       direction: heading.direction,
       dimension: bot.game?.dimension,
       grounded: typeof onGround === "boolean" ? onGround : undefined,
-      ts: Date.now(),
+      ts: this.now(),
     };
   }
 
@@ -879,6 +1031,7 @@ export class McSession extends EventEmitter {
   private emitPosition(force = false): void {
     const msg = this.positionSnapshot();
     if (!msg) return;
+    this.recordPositionSample(msg);
     const signature = [
       msg.x.toFixed(3),
       msg.y.toFixed(3),
@@ -934,11 +1087,15 @@ export class McSession extends EventEmitter {
     if (expiresAt == null) return;
     this.movementWatchdogTimer = setTimeout(() => {
       this.movementWatchdogTimer = null;
-      if (this.movementLeases.expire(Date.now())) {
-        this.syncMovementControls();
-      }
+      this.expireMovementLeases();
       this.armMovementWatchdog();
-    }, Math.max(0, expiresAt - Date.now()));
+    }, Math.max(0, expiresAt - this.now()));
+  }
+
+  private expireMovementLeases(): void {
+    if (this.movementLeases.expire(this.now())) {
+      this.syncMovementControls();
+    }
   }
 
   private stopMovementWatchdog(): void {

@@ -1,4 +1,9 @@
 import { McSession } from "./mc-session";
+import type {
+  MovementDiagnosticEvent,
+  MovementEventDiagnostic,
+  MovementPositionDelta3s,
+} from "./mc-session";
 import type { BridgeConfig, BridgeServerProfile, ServerMessage } from "./types";
 
 interface ManagedSession {
@@ -31,6 +36,13 @@ export interface ManagedSessionSummary {
   blockLoaded: boolean;
   gameMode?: string;
   velocity?: { x: number; y: number; z: number };
+  movementEpoch: number;
+  teleportEpoch: number;
+  epochEvents: Record<MovementDiagnosticEvent, MovementEventDiagnostic>;
+  lastForcedMoveAt?: number;
+  lastPhysicsTickAt?: number;
+  loadedColumns: number;
+  positionDelta3s?: MovementPositionDelta3s;
   position?: {
     x: number;
     y: number;
@@ -223,6 +235,13 @@ export class SessionManager {
           blockLoaded: movement.blockLoaded,
           gameMode: movement.gameMode,
           velocity: movement.velocity,
+          movementEpoch: movement.movementEpoch,
+          teleportEpoch: movement.teleportEpoch,
+          epochEvents: movement.epochEvents,
+          lastForcedMoveAt: movement.lastForcedMoveAt,
+          lastPhysicsTickAt: movement.lastPhysicsTickAt,
+          loadedColumns: movement.loadedColumns,
+          positionDelta3s: movement.positionDelta3s,
           position: position
             ? {
                 x: position.x,
