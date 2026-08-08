@@ -408,6 +408,23 @@ test("publishes movement evidence through managed session status", (t) => {
   assert.equal(summary.loadedColumns, 3);
 });
 
+test("keeps admin diagnostics safe while Mineflayer tears down its world", (t) => {
+  // Given
+  const { bot, session } = diagnosticSession();
+  t.after(() => session.shutdown("test complete"));
+  bot.world = undefined;
+  bot.blockAt = () => {
+    throw new TypeError("world is unavailable");
+  };
+
+  // When
+  const diagnostics = session.movementDiagnostics();
+
+  // Then
+  assert.equal(diagnostics.blockLoaded, false);
+  assert.equal(diagnostics.loadedColumns, 0);
+});
+
 test("reports a bounded three-second position delta sample", (t) => {
   // Given
   const { bot, session, setNow } = diagnosticSession();

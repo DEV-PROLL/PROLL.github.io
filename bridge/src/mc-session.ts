@@ -681,6 +681,26 @@ export class McSession extends EventEmitter {
     const bot = this.bot;
     const position = bot?.entity?.position;
     const velocity = bot?.entity?.velocity;
+    let blockLoaded = false;
+    let loadedColumns = 0;
+
+    // Mineflayer can clear `world` before the session object is detached. The
+    // admin dashboard may sample this short teardown window, so diagnostics
+    // must remain observational and never take down the bridge process.
+    try {
+      blockLoaded = Boolean(bot && position && bot.blockAt(position, false));
+    } catch {
+      blockLoaded = false;
+    }
+    try {
+      const world = bot?.world as
+        | { getColumns?: () => unknown[] }
+        | undefined;
+      loadedColumns = world?.getColumns?.().length ?? 0;
+    } catch {
+      loadedColumns = 0;
+    }
+
     return {
       controls: [...this.movementLeases.activeControls()],
       botControls: Object.fromEntries(
@@ -690,7 +710,7 @@ export class McSession extends EventEmitter {
         ]),
       ) as Record<MovementControl, boolean>,
       physicsEnabled: bot?.physicsEnabled === true,
-      blockLoaded: Boolean(bot && position && bot.blockAt(position, false)),
+      blockLoaded,
       gameMode: bot?.game?.gameMode,
       velocity: velocity
         ? { x: velocity.x, y: velocity.y, z: velocity.z }
@@ -707,7 +727,7 @@ export class McSession extends EventEmitter {
       },
       lastForcedMoveAt: this.lastForcedMoveAt,
       lastPhysicsTickAt: this.lastPhysicsTickAt,
-      loadedColumns: bot ? bot.world.getColumns().length : 0,
+      loadedColumns,
       positionDelta3s: this.positionDelta3s(),
     };
   }
