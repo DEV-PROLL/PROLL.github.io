@@ -54,6 +54,7 @@ jobs:
           npm run web:export
         env:
           EXPO_PUBLIC_BRIDGE_URL: ${{ secrets.EXPO_PUBLIC_BRIDGE_URL }}
+          EXPO_PUBLIC_HEAD_RENDER_ENABLED: ${{ vars.EXPO_PUBLIC_HEAD_RENDER_ENABLED }}
           EXPO_PUBLIC_MOVEMENT_ENABLED: ${{ vars.EXPO_PUBLIC_MOVEMENT_ENABLED }}
           EXPO_PUBLIC_MOVEMENT_TEST_IGN: ${{ vars.EXPO_PUBLIC_MOVEMENT_TEST_IGN }}
 
