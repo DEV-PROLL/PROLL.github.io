@@ -3,6 +3,7 @@ import type { BridgeConfig, BridgeServerProfile } from "./types";
 import { assertSupportedMcVersion } from "./mc-versions";
 
 export const HEAD_METADATA_ENABLED = process.env.HEAD_METADATA_ENABLED === "1";
+export const HEAD_DEBUG_ENABLED = process.env.HEAD_DEBUG === "1";
 
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -58,6 +59,8 @@ export function loadConfig(): BridgeConfig {
     chatRateLimit: num("CHAT_RATE_LIMIT", 2),
     sessionGraceMs: positiveInt("SESSION_GRACE_MS", 30 * 60 * 1000),
     movementAllowedIgns: csv("MOVEMENT_ALLOWED_IGNS"),
+    headMetadataEnabled: HEAD_METADATA_ENABLED,
+    headDebugEnabled: HEAD_DEBUG_ENABLED,
   };
 }
 

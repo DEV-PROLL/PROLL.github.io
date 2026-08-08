@@ -192,6 +192,40 @@ export interface GuiItem {
   };
 }
 
+export type HeadProfileBranch =
+  | "componentMap"
+  | "component"
+  | "legacy-nbt"
+  | "none";
+
+export type HeadFailureReason =
+  | "no-profile"
+  | "bad-base64"
+  | "non-canonical"
+  | "oversize"
+  | "bad-json"
+  | "bad-host"
+  | "bad-id";
+
+export interface HeadShapeDiagnostic {
+  readonly branch: HeadProfileBranch;
+  readonly profileKeys: readonly string[];
+  readonly hasUuid: boolean;
+  readonly hasName: boolean;
+  readonly hasTextures: boolean;
+  readonly nameValid: boolean;
+  readonly uuidValid: boolean;
+  readonly failureReason?: HeadFailureReason;
+  readonly textureIdHash8?: string;
+}
+
+export interface HeadDiagnostics {
+  readonly headsSeen: number;
+  readonly headsWithHeadField: number;
+  readonly byBranch: Record<HeadProfileBranch, number>;
+  readonly byFailureReason: Record<HeadFailureReason, number>;
+}
+
 export interface BridgeServerProfile {
   id: string;
   name: string;
@@ -215,4 +249,6 @@ export interface BridgeConfig {
   chatRateLimit: number;
   sessionGraceMs: number;
   movementAllowedIgns: string[];
+  headMetadataEnabled: boolean;
+  headDebugEnabled: boolean;
 }

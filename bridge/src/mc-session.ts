@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { createHash } from "crypto";
 import mineflayer from "mineflayer";
 import type { Bot } from "mineflayer";
 import type { Item } from "prismarine-item";
@@ -10,6 +11,10 @@ import type {
   CompletionMatch,
   GuiItem,
   GuiWindow,
+  HeadDiagnostics,
+  HeadFailureReason,
+  HeadProfileBranch,
+  HeadShapeDiagnostic,
   PlayerSummary,
   ServerMessage,
 } from "./types";
@@ -27,7 +32,7 @@ import {
   type MovementControl,
 } from "./movement-control";
 import { headingFromMineflayerYaw } from "./position-direction";
-import { HEAD_METADATA_ENABLED } from "./config";
+import { HEAD_DEBUG_ENABLED, HEAD_METADATA_ENABLED } from "./config";
 
 type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
 type BossBarsMessage = Extract<ServerMessage, { type: "boss_bars" }>;
@@ -37,6 +42,7 @@ type SerializedLoreLine = { text: string; segments?: ChatSegment[] };
 
 const DEBUG_GUI_ITEMS = process.env.DEBUG_GUI_ITEMS === "1";
 const POSITION_SYNC_MS = 250;
+const POSITION_HEARTBEAT_MS = 1_000;
 const POSITION_SAMPLE_WINDOW_MS = 3_000;
 const POSITION_SAMPLE_LIMIT = 12;
 const debuggedGuiItems = new Set<string>();
@@ -99,6 +105,11 @@ export interface MovementDiagnostics {
   readonly positionDelta3s?: MovementPositionDelta3s;
 }
 
+export interface HeadInspection {
+  readonly head?: GuiItem["head"];
+  readonly diagnostic: HeadShapeDiagnostic;
+}
+
 export interface McSessionOptions {
   host: string;
   port: number;
@@ -145,6 +156,7 @@ export class McSession extends EventEmitter {
   private lastBossBarsSignature = "";
   private lastPlayerStateSignature = "";
   private lastPositionSignature = "";
+  private lastPositionEmittedAt: number | undefined;
   private readonly suppressedBossBarIds = new Set<string>();
   private readonly movementLeases = new MovementLeaseBook();
   private positionTimer: NodeJS.Timeout | null = null;
@@ -165,6 +177,31 @@ export class McSession extends EventEmitter {
   private lastForcedMoveAt: number | undefined;
   private lastPhysicsTickAt: number | undefined;
   private readonly movementPositionSamples: MovementPositionSample[] = [];
+  private readonly headDiagnosticShapes = new Set<string>();
+  private readonly headDiagnosticCounters: {
+    headsSeen: number;
+    headsWithHeadField: number;
+    byBranch: Record<HeadProfileBranch, number>;
+    byFailureReason: Record<HeadFailureReason, number>;
+  } = {
+    headsSeen: 0,
+    headsWithHeadField: 0,
+    byBranch: {
+      componentMap: 0,
+      component: 0,
+      "legacy-nbt": 0,
+      none: 0,
+    },
+    byFailureReason: {
+      "no-profile": 0,
+      "bad-base64": 0,
+      "non-canonical": 0,
+      oversize: 0,
+      "bad-json": 0,
+      "bad-host": 0,
+      "bad-id": 0,
+    },
+  };
 
   // Anti-AFK: nudge the bot every ~3 minutes so the server doesn't kick it.
   private antiAfkTimer: NodeJS.Timeout | null = null;
@@ -646,6 +683,39 @@ export class McSession extends EventEmitter {
     };
   }
 
+  headDiagnostics(): HeadDiagnostics {
+    return {
+      headsSeen: this.headDiagnosticCounters.headsSeen,
+      headsWithHeadField: this.headDiagnosticCounters.headsWithHeadField,
+      byBranch: { ...this.headDiagnosticCounters.byBranch },
+      byFailureReason: { ...this.headDiagnosticCounters.byFailureReason },
+    };
+  }
+
+  private recordHeadDiagnostic(
+    inspection: HeadInspection,
+    hasHeadField: boolean,
+  ): void {
+    if (!HEAD_DEBUG_ENABLED) return;
+    this.headDiagnosticCounters.headsSeen += 1;
+    if (hasHeadField) this.headDiagnosticCounters.headsWithHeadField += 1;
+    const { diagnostic } = inspection;
+    this.headDiagnosticCounters.byBranch[diagnostic.branch] += 1;
+    if (diagnostic.failureReason) {
+      this.headDiagnosticCounters.byFailureReason[diagnostic.failureReason] += 1;
+    }
+
+    const signature = JSON.stringify(diagnostic);
+    if (
+      this.headDiagnosticShapes.has(signature) ||
+      this.headDiagnosticShapes.size >= 40
+    ) {
+      return;
+    }
+    this.headDiagnosticShapes.add(signature);
+    console.info(`[mc-session] head_shape ${signature}`);
+  }
+
   private recordMovementEpoch(event: MovementEpochEvent): void {
     const now = this.now();
     this.movementEpoch += 1;
@@ -736,7 +806,9 @@ export class McSession extends EventEmitter {
   private emitWindowSnapshot(type: "window_open" | "window_update", window: Window): void {
     this.emitMsg({
       type,
-      window: serializeWindow(window),
+      window: serializeWindow(window, (inspection, hasHeadField) => {
+        this.recordHeadDiagnostic(inspection, hasHeadField);
+      }),
     });
   }
 
@@ -1027,6 +1099,7 @@ export class McSession extends EventEmitter {
     if (this.positionTimer) clearInterval(this.positionTimer);
     this.positionTimer = null;
     this.lastPositionSignature = "";
+    this.lastPositionEmittedAt = undefined;
   }
 
   private emitPosition(force = false): void {
@@ -1041,8 +1114,18 @@ export class McSession extends EventEmitter {
       msg.dimension ?? "",
       msg.grounded ?? "",
     ].join(":");
-    if (!force && signature === this.lastPositionSignature) return;
+    const heartbeatDue =
+      this.lastPositionEmittedAt == null ||
+      msg.ts - this.lastPositionEmittedAt >= POSITION_HEARTBEAT_MS;
+    if (
+      !force &&
+      signature === this.lastPositionSignature &&
+      !heartbeatDue
+    ) {
+      return;
+    }
     this.lastPositionSignature = signature;
+    this.lastPositionEmittedAt = msg.ts;
     this.emitMsg(msg);
   }
 
@@ -1302,7 +1385,13 @@ function clampRange(value: number | undefined, min: number, max: number): number
   return value == null ? undefined : Math.max(min, Math.min(max, value));
 }
 
-function serializeWindow(window: Window): GuiWindow {
+function serializeWindow(
+  window: Window,
+  recordHeadDiagnostic?: (
+    inspection: HeadInspection,
+    hasHeadField: boolean,
+  ) => void,
+): GuiWindow {
   return {
     id: window.id,
     type: String(window.type),
@@ -1311,15 +1400,21 @@ function serializeWindow(window: Window): GuiWindow {
     inventoryStart: window.inventoryStart,
     inventoryEnd: window.inventoryEnd,
     hotbarStart: window.hotbarStart,
-    selectedItem: serializeItem(window.selectedItem),
+    selectedItem: serializeItem(window.selectedItem, recordHeadDiagnostic),
     slots: window.slots.map((item, index) => ({
       index,
-      item: serializeItem(item),
+      item: serializeItem(item, recordHeadDiagnostic),
     })),
   };
 }
 
-function serializeItem(item: Item | null | undefined): GuiItem | null {
+function serializeItem(
+  item: Item | null | undefined,
+  recordHeadDiagnostic?: (
+    inspection: HeadInspection,
+    hasHeadField: boolean,
+  ) => void,
+): GuiItem | null {
   if (!item) return null;
   const displayNameSource = firstNonEmptyComponent([
     item.customName,
@@ -1354,7 +1449,15 @@ function serializeItem(item: Item | null | undefined): GuiItem | null {
   const loreSegments = loreLines.map((line) => line.segments).some(Boolean)
     ? loreLines.map((line) => line.segments ?? [{ text: line.text }])
     : undefined;
-  const head = HEAD_METADATA_ENABLED ? extractHeadInfo(item) : undefined;
+  const headInspection =
+    (item.name === "player_head" || item.name === "player_wall_head") &&
+    (HEAD_METADATA_ENABLED || HEAD_DEBUG_ENABLED)
+      ? inspectHeadInfo(item)
+      : undefined;
+  const head = HEAD_METADATA_ENABLED ? headInspection?.head : undefined;
+  if (headInspection && recordHeadDiagnostic) {
+    recordHeadDiagnostic(headInspection, Boolean(head));
+  }
   debugGuiItem(item, displayName, lore);
   return {
     name: item.name,
@@ -1374,56 +1477,155 @@ const PLAYER_NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
 const TEXTURE_ID_RE = /^[0-9a-f]{40,64}$/;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const SAFE_PROFILE_DEBUG_KEYS = new Set([
+  "Id",
+  "Name",
+  "Properties",
+  "SKIN",
+  "Signature",
+  "SkullOwner",
+  "Textures",
+  "UUID",
+  "Value",
+  "body",
+  "cape",
+  "data",
+  "elytra",
+  "id",
+  "minecraft:profile",
+  "model",
+  "name",
+  "profile",
+  "properties",
+  "signature",
+  "skinPatch",
+  "textures",
+  "type",
+  "url",
+  "uuid",
+  "value",
+]);
 
 export function extractHeadInfo(
   item: Item | null | undefined,
 ): GuiItem["head"] | undefined {
+  return inspectHeadInfo(item).head;
+}
+
+export function inspectHeadInfo(
+  item: Item | null | undefined,
+): HeadInspection {
   try {
     if (
       !item ||
       (item.name !== "player_head" && item.name !== "player_wall_head")
     ) {
-      return undefined;
+      return {
+        diagnostic: emptyHeadDiagnostic("none", "no-profile"),
+      };
     }
 
-    const profile = readHeadProfile(item) ?? readLegacySkullOwner(item);
-    const record = profileRecord(profile);
-    if (!record) return undefined;
+    const source = readHeadProfile(item);
+    const record = profileRecord(source.profile);
+    if (!record) {
+      return {
+        diagnostic: {
+          ...emptyHeadDiagnostic(source.branch, "no-profile"),
+          profileKeys: profileKeys(source.profile),
+        },
+      };
+    }
 
-    const playerUuid = sanitizePlayerUuid(
-      firstField(record, ["uuid", "UUID", "id", "Id"]),
-    );
-    const playerName = sanitizePlayerName(
-      firstField(record, ["name", "Name"]),
-    );
+    const uuidValue = firstField(record, ["uuid", "UUID", "id", "Id"]);
+    const nameValue = firstField(record, ["name", "Name"]);
+    const playerUuid = sanitizePlayerUuid(uuidValue);
+    const playerName = sanitizePlayerName(nameValue);
     const textureValue = texturePropertyValue(
       firstField(record, ["properties", "Properties"]),
     );
-    const textureId = textureValue
+    const textureResult = textureValue
       ? textureIdFromEncodedProfile(textureValue)
       : undefined;
-
-    if (!playerUuid && !playerName && !textureId) return undefined;
+    const textureId = textureResult?.textureId;
+    const head =
+      playerUuid || playerName || textureId
+        ? {
+            ...(playerUuid ? { playerUuid } : {}),
+            ...(playerName ? { playerName } : {}),
+            ...(textureId ? { textureId } : {}),
+          }
+        : undefined;
     return {
-      ...(playerUuid ? { playerUuid } : {}),
-      ...(playerName ? { playerName } : {}),
-      ...(textureId ? { textureId } : {}),
+      head,
+      diagnostic: {
+        branch: source.branch,
+        profileKeys: profileKeys(source.profile),
+        hasUuid: uuidValue != null,
+        hasName: nameValue != null,
+        hasTextures: textureValue != null,
+        nameValid: playerName != null,
+        uuidValid: playerUuid != null,
+        ...(textureResult?.failureReason
+          ? { failureReason: textureResult.failureReason }
+          : {}),
+        ...(textureId && HEAD_DEBUG_ENABLED
+          ? {
+              textureIdHash8: createHash("sha256")
+                .update(textureId)
+                .digest("hex")
+                .slice(0, 8),
+            }
+          : {}),
+      },
     };
   } catch {
-    return undefined;
+    return {
+      diagnostic: emptyHeadDiagnostic("none", "no-profile"),
+    };
   }
 }
 
-function readHeadProfile(item: Item): unknown {
+function emptyHeadDiagnostic(
+  branch: HeadProfileBranch,
+  failureReason: HeadFailureReason,
+): HeadShapeDiagnostic {
+  return {
+    branch,
+    profileKeys: [],
+    hasUuid: false,
+    hasName: false,
+    hasTextures: false,
+    nameValid: false,
+    uuidValid: false,
+    failureReason,
+  };
+}
+
+function readHeadProfile(
+  item: Item,
+): { readonly branch: HeadProfileBranch; readonly profile: unknown } {
   const componentMap = (item as unknown as Record<string, unknown>).componentMap;
   if (componentMap instanceof Map) {
     for (const key of ["profile", "minecraft:profile"]) {
       if (componentMap.has(key)) {
-        return componentPayload(componentMap.get(key));
+        const profile = componentPayload(componentMap.get(key));
+        if (profile != null) {
+          return {
+            branch: "componentMap",
+            profile,
+          };
+        }
       }
     }
   }
-  return readItemComponent(item, ["minecraft:profile", "profile"]);
+  const component = readItemComponent(item, ["minecraft:profile", "profile"]);
+  if (component != null) {
+    return { branch: "component", profile: component };
+  }
+  const legacy = readLegacySkullOwner(item);
+  return legacy == null
+    ? { branch: "none", profile: undefined }
+    : { branch: "legacy-nbt", profile: legacy };
 }
 
 function readLegacySkullOwner(item: Item): unknown {
@@ -1469,6 +1671,22 @@ function profileRecord(value: unknown): Record<string, unknown> | undefined {
     }
   }
   return undefined;
+}
+
+function profileKeys(value: unknown): string[] {
+  const normalized = unwrapNbtValue(value);
+  if (
+    !normalized ||
+    typeof normalized !== "object" ||
+    Array.isArray(normalized) ||
+    normalized instanceof Map
+  ) {
+    return [];
+  }
+  return Object.keys(normalized as Record<string, unknown>)
+    .sort()
+    .slice(0, 24)
+    .map((key) => redactIdentityBearingKey(key, true));
 }
 
 function firstField(
@@ -1588,29 +1806,50 @@ function stringValue(value: unknown): string | undefined {
     : undefined;
 }
 
-function textureIdFromEncodedProfile(encoded: string): string | undefined {
-  if (
-    encoded.length === 0 ||
-    encoded.length > MAX_ENCODED_HEAD_TEXTURE_BYTES ||
-    !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)
-  ) {
-    return undefined;
+function textureIdFromEncodedProfile(
+  encoded: string,
+): { readonly textureId?: string; readonly failureReason?: HeadFailureReason } {
+  if (encoded.length > MAX_ENCODED_HEAD_TEXTURE_BYTES) {
+    return { failureReason: "oversize" };
+  }
+  if (encoded.length === 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+    return { failureReason: "bad-base64" };
   }
 
   try {
     const decoded = Buffer.from(encoded, "base64");
     const canonical = decoded.toString("base64").replace(/=+$/, "");
-    if (canonical !== encoded.replace(/=+$/, "")) return undefined;
-    const payload = JSON.parse(decoded.toString("utf8")) as unknown;
-    if (!payload || typeof payload !== "object") return undefined;
+    if (canonical !== encoded.replace(/=+$/, "")) {
+      return { failureReason: "non-canonical" };
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(decoded.toString("utf8")) as unknown;
+    } catch {
+      return { failureReason: "bad-json" };
+    }
+    if (!payload || typeof payload !== "object") {
+      return { failureReason: "bad-json" };
+    }
     const textures = (payload as Record<string, unknown>).textures;
-    if (!textures || typeof textures !== "object") return undefined;
+    if (!textures || typeof textures !== "object") {
+      return { failureReason: "bad-json" };
+    }
     const skin = (textures as Record<string, unknown>).SKIN;
-    if (!skin || typeof skin !== "object") return undefined;
+    if (!skin || typeof skin !== "object") {
+      return { failureReason: "bad-json" };
+    }
     const urlValue = (skin as Record<string, unknown>).url;
-    if (typeof urlValue !== "string") return undefined;
+    if (typeof urlValue !== "string") {
+      return { failureReason: "bad-json" };
+    }
 
-    const url = new URL(urlValue);
+    let url: URL;
+    try {
+      url = new URL(urlValue);
+    } catch {
+      return { failureReason: "bad-host" };
+    }
     if (
       url.protocol !== "https:" ||
       url.host !== "textures.minecraft.net" ||
@@ -1619,12 +1858,14 @@ function textureIdFromEncodedProfile(encoded: string): string | undefined {
       url.search ||
       url.hash
     ) {
-      return undefined;
+      return { failureReason: "bad-host" };
     }
     const match = /^\/texture\/([0-9a-f]{40,64})$/.exec(url.pathname);
-    return match && TEXTURE_ID_RE.test(match[1]) ? match[1] : undefined;
+    return match && TEXTURE_ID_RE.test(match[1])
+      ? { textureId: match[1] }
+      : { failureReason: "bad-id" };
   } catch {
-    return undefined;
+    return { failureReason: "bad-json" };
   }
 }
 
@@ -1637,7 +1878,7 @@ function debugGuiItem(item: Item, displayName: string, lore: string[]): void {
   console.log(`[bridge] gui_item ${key}`);
 }
 
-function summarizeItemForDebug(
+export function summarizeItemForDebug(
   item: Item,
   displayName: string,
   lore: string[],
@@ -1645,8 +1886,8 @@ function summarizeItemForDebug(
   const obj = item as unknown as Record<string, unknown>;
   return {
     name: item.name,
-    displayName,
-    lore,
+    displayName: summarizeValue(displayName),
+    lore: summarizeValue(lore),
     customName: summarizeValue(obj.customName),
     customLore: summarizeValue(obj.customLore),
     componentKeys: componentKeys(item),
@@ -1678,10 +1919,26 @@ function componentKeys(item: Item): string[] {
   return [...keys].sort();
 }
 
-function summarizeValue(value: unknown, depth = 0): unknown {
+interface DebugSummaryContext {
+  readonly depth: number;
+  readonly profile: boolean;
+  readonly properties: boolean;
+  readonly field?: string;
+}
+
+function summarizeValue(
+  value: unknown,
+  context: DebugSummaryContext = {
+    depth: 0,
+    profile: false,
+    properties: false,
+  },
+): unknown {
   const normalized = unwrapNbtValue(value);
   if (normalized == null) return normalized;
   if (typeof normalized === "string") {
+    const redaction = debugRedactionKind(normalized, context);
+    if (redaction) return `<redacted:${redaction}:${normalized.length}>`;
     return normalized.length > 220 ? `${normalized.slice(0, 220)}...` : normalized;
   }
   if (
@@ -1690,29 +1947,114 @@ function summarizeValue(value: unknown, depth = 0): unknown {
   ) {
     return normalized;
   }
-  if (depth >= 6) return "[Object]";
+  if (context.depth >= 6) return "[Object]";
   if (normalized instanceof Map) {
     const entries: Record<string, unknown> = {};
     let count = 0;
     for (const [key, entryValue] of normalized.entries()) {
       if (count >= 12) break;
-      entries[String(key)] = summarizeValue(entryValue, depth + 1);
+      const field = String(key);
+      entries[redactIdentityBearingKey(field, context.profile)] = summarizeValue(
+        entryValue,
+        childDebugSummaryContext(context, field),
+      );
       count += 1;
     }
     return entries;
   }
   if (Array.isArray(normalized)) {
-    return normalized.slice(0, 12).map((entry) => summarizeValue(entry, depth + 1));
+    return normalized.slice(0, 12).map((entry) =>
+      summarizeValue(entry, {
+        ...context,
+        depth: context.depth + 1,
+      }),
+    );
   }
   if (typeof normalized === "object") {
     const record = normalized as Record<string, unknown>;
     const out: Record<string, unknown> = {};
+    const profile =
+      context.profile ||
+      ["type", "key"].some((key) => {
+        const candidate = stringValue(record[key]);
+        return candidate === "profile" || candidate === "minecraft:profile";
+      });
     for (const key of Object.keys(record).slice(0, 16)) {
-      out[key] = summarizeValue(record[key], depth + 1);
+      out[redactIdentityBearingKey(key, profile)] = summarizeValue(
+        record[key],
+        childDebugSummaryContext({ ...context, profile }, key),
+      );
     }
     return out;
   }
   return String(normalized);
+}
+
+function childDebugSummaryContext(
+  context: DebugSummaryContext,
+  field: string,
+): DebugSummaryContext {
+  const normalizedField = field.toLowerCase();
+  const profile =
+    context.profile ||
+    normalizedField === "profile" ||
+    normalizedField === "minecraft:profile" ||
+    normalizedField === "skullowner";
+  return {
+    depth: context.depth + 1,
+    profile,
+    properties:
+      context.properties ||
+      (profile &&
+        (normalizedField === "properties" ||
+          normalizedField === "minecraft:properties")),
+    field,
+  };
+}
+
+function debugRedactionKind(
+  value: string,
+  context: DebugSummaryContext,
+): "uuid" | "name" | "texture" | undefined {
+  if (
+    UUID_RE.test(value.toLowerCase()) ||
+    /^[0-9a-f]{32}$/i.test(value)
+  ) {
+    return "uuid";
+  }
+  if (/^eyJ[A-Za-z0-9+/_=-]+$/.test(value)) return "texture";
+  if (!context.profile || !context.field) return undefined;
+
+  const field = context.field.toLowerCase();
+  if (!SAFE_PROFILE_DEBUG_KEYS.has(context.field)) return "name";
+  if (field === "uuid" || field === "id" || field === "profileid") {
+    return "uuid";
+  }
+  if (
+    field === "name" ||
+    field === "profilename" ||
+    field === "profile" ||
+    field === "skullowner"
+  ) {
+    return "name";
+  }
+  if (
+    context.properties &&
+    (field === "value" || field === "signature")
+  ) {
+    return "texture";
+  }
+  return undefined;
+}
+
+function redactIdentityBearingKey(key: string, profile: boolean): string {
+  return (profile && !SAFE_PROFILE_DEBUG_KEYS.has(key)) ||
+    UUID_RE.test(key.toLowerCase()) ||
+    /^[0-9a-f]{32}$/i.test(key) ||
+    /^eyJ[A-Za-z0-9+/_=-]+$/.test(key) ||
+    key.length > 64
+    ? `<redacted:key:${key.length}>`
+    : key;
 }
 
 function firstNonEmptyComponent(candidates: unknown[]): unknown {

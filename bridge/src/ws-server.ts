@@ -3,7 +3,13 @@ import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { randomUUID } from "crypto";
 import { ping, type NewPingResult, type OldPingResult } from "minecraft-protocol";
 import { monitorEventLoopDelay, type IntervalHistogram } from "perf_hooks";
-import type { BridgeConfig, BridgeServerProfile, ClientMessage, ServerMessage } from "./types";
+import type {
+  BridgeConfig,
+  BridgeServerProfile,
+  ClientMessage,
+  HeadDiagnostics,
+  ServerMessage,
+} from "./types";
 import { AuthService, type AuthResult, type DeviceCode } from "./auth";
 import type { McSession } from "./mc-session";
 import type { SessionManager } from "./session-manager";
@@ -731,6 +737,56 @@ function buildAdminStatus(
   stats.clientTicketsExpired += cleanupClientTickets(clientTickets);
   const mem = process.memoryUsage();
   const sessionStats = sessions.stats();
+  const headDiagnostics: {
+    headsSeen: number;
+    headsWithHeadField: number;
+    byBranch: HeadDiagnostics["byBranch"];
+    byFailureReason: HeadDiagnostics["byFailureReason"];
+  } = {
+    headsSeen: 0,
+    headsWithHeadField: 0,
+    byBranch: {
+      componentMap: 0,
+      component: 0,
+      "legacy-nbt": 0,
+      none: 0,
+    },
+    byFailureReason: {
+      "no-profile": 0,
+      "bad-base64": 0,
+      "non-canonical": 0,
+      oversize: 0,
+      "bad-json": 0,
+      "bad-host": 0,
+      "bad-id": 0,
+    },
+  };
+  for (const session of sessionStats.sessions) {
+    headDiagnostics.headsSeen += session.headDiagnostics.headsSeen;
+    headDiagnostics.headsWithHeadField +=
+      session.headDiagnostics.headsWithHeadField;
+    for (const branch of [
+      "componentMap",
+      "component",
+      "legacy-nbt",
+      "none",
+    ] as const) {
+      headDiagnostics.byBranch[branch] +=
+        session.headDiagnostics.byBranch[branch];
+    }
+    for (const failureReason of [
+      "no-profile",
+      "bad-base64",
+      "non-canonical",
+      "oversize",
+      "bad-json",
+      "bad-host",
+      "bad-id",
+    ] as const) {
+      headDiagnostics.byFailureReason[failureReason] +=
+        session.headDiagnostics.byFailureReason[failureReason];
+    }
+  }
   const memorySamples = recordMemorySample(stats, mem, sessionStats.active);
   return {
     ok: true,
@@ -755,6 +811,8 @@ function buildAdminStatus(
       maxMessageBytes: MAX_WS_MESSAGE_BYTES,
       sessionGraceMs: cfg.sessionGraceMs,
       movementAllowedIgnCount: cfg.movementAllowedIgns.length,
+      headMetadataEnabled: cfg.headMetadataEnabled,
+      headDebugEnabled: cfg.headDebugEnabled,
       rateWindowMs: RATE_WINDOW_MS,
       rateLimits: {
         wsUpgrade: WS_UPGRADE_RATE_LIMIT,
@@ -813,6 +871,7 @@ function buildAdminStatus(
       movementRateLimited: stats.movementRateLimited,
     },
     sessions: sessionStats,
+    headDiagnostics,
     memory: {
       samples: memorySamples,
     },

@@ -444,6 +444,38 @@ test("reports a bounded three-second position delta sample", (t) => {
   });
 });
 
+test("heartbeats unchanged connected positions without delaying movement", (t) => {
+  // Given
+  const { bot, session, setNow } = diagnosticSession();
+  t.after(() => session.shutdown("test complete"));
+  const positions = [];
+  session.on("message", (message) => {
+    if (message.type === "position") positions.push(message);
+  });
+
+  // When
+  session.emitPosition(true);
+  for (const now of [10_250, 10_500, 10_750]) {
+    setNow(now);
+    session.emitPosition();
+  }
+  setNow(11_000);
+  session.emitPosition();
+  setNow(11_250);
+  bot.entity.position = { x: 1, y: 64, z: 0 };
+  session.emitPosition();
+
+  // Then
+  assert.deepEqual(
+    positions.map(({ x, y, z, ts }) => ({ x, y, z, ts })),
+    [
+      { x: 0, y: 64, z: 0, ts: 10_000 },
+      { x: 0, y: 64, z: 0, ts: 11_000 },
+      { x: 1, y: 64, z: 0, ts: 11_250 },
+    ],
+  );
+});
+
 test("maps Mineflayer yaw from north through its right-handed rotation", () => {
   // prismarine-physics defines yaw from -Z (north), with positive yaw toward west.
   const sectors = ["N", "NW", "W", "SW", "S", "SE", "E", "NE"];

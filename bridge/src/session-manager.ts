@@ -4,7 +4,7 @@ import type {
   MovementEventDiagnostic,
   MovementPositionDelta3s,
 } from "./mc-session";
-import type { BridgeConfig, BridgeServerProfile, ServerMessage } from "./types";
+import type { BridgeConfig, BridgeServerProfile, HeadDiagnostics, ServerMessage } from "./types";
 
 interface ManagedSession {
   session: McSession;
@@ -43,6 +43,7 @@ export interface ManagedSessionSummary {
   lastPhysicsTickAt?: number;
   loadedColumns: number;
   positionDelta3s?: MovementPositionDelta3s;
+  headDiagnostics: HeadDiagnostics;
   position?: {
     x: number;
     y: number;
@@ -242,6 +243,7 @@ export class SessionManager {
           lastPhysicsTickAt: movement.lastPhysicsTickAt,
           loadedColumns: movement.loadedColumns,
           positionDelta3s: movement.positionDelta3s,
+          headDiagnostics: entry.session.headDiagnostics(),
           position: position
             ? {
                 x: position.x,
