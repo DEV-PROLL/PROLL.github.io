@@ -4,8 +4,17 @@
 - Revision: 2026-08-08 under `task_45fdf66be8eb` / dispatch `ctx_77c7cf14f472` — coordinator-verified corrections
   applied (direct head rendering as default, monotonic movement epochs, map read/slice budgets, raw palette-index
   encoding decision).
+- Revision: 2026-08-08 under `task_1d168f29dfb7` / dispatch `ctx_609912893d07` — refined from LIVE SIMULATOR
+  EVIDENCE after first implementation commits landed. Ordinary item textures render, but some `player_head` slots
+  still show the lettered "PH" fallback. Adds: implemented-state ledger (sections 1.8, 2.6), PH-fallback
+  root-cause matrix with a verified missing-asset fact, privacy-safe head diagnostics (H5), evidence-gated
+  extraction hardening + terminal render tier (H6), a live position-evidence protocol for movement, and explicit
+  simulator + production acceptance gates for all three tracks (sections 1.8.6, 2.6.2, 3.7).
 - Date: 2026-08-08
-- Repo state: branch `DEV-PROLL/player-head-movement-map-plan` @ `38adcbf` (same commit as main checkout)
+- Repo state: branch `DEV-PROLL/player-head-movement-map-plan` @ `7005328` — three implementation commits now sit
+  on top of the original plan commit `0a8b815`: `911535e` (feat: render custom player head textures = phases
+  H1+H3), `7005328` (fix: overlay legacy player head hats), `31561b3` (Instrument movement diagnostics = phase
+  M1). Line citations in revision sections were verified against this worktree state.
 - Status: PLAN ONLY. No production code, dependency, lockfile, or deployment changes are made by this document.
 - Verified against installed sources in the main checkout (`/Users/prolls/Desktop/PROLL.github.io/node_modules`):
   mineflayer 4.37.1, minecraft-protocol 1.66.2, prismarine-item 1.18.0, prismarine-chunk 1.40.0,
@@ -211,6 +220,129 @@ Simulator/manual QA (Mac + iOS Simulator flow from `README.md`):
 - No plugin/proxy/user blockers: everything needed arrives in the window items the bridge already receives.
 - Risk: the live server may send `partial` profiles with only `name` for menu heads; tier 3 covers it.
 - Verdict: READY TO IMPLEMENT (H1 then H3, direct rendering; H2 deferred fallback pending live QA; H4 optional).
+  Superseded by section 1.8: H1+H3 have since landed; the remaining work is H5 (diagnosis) then H6 (hardening).
+
+### 1.8 Revision: implemented state and the remaining "PH fallback" gap (live simulator evidence)
+
+#### 1.8.1 What is implemented now (verified in this worktree)
+
+- Bridge extraction (H1, commit `911535e`): `extractHeadInfo()` at `bridge/src/mc-session.ts:1378`, gated by
+  `HEAD_METADATA_ENABLED === "1"` (`bridge/src/config.ts:5`, default OFF) and wired into `serializeItem()` at
+  `mc-session.ts:1357`. Covers component-map `profile`/`minecraft:profile`, `readItemComponent` fallback, legacy
+  `SkullOwner` NBT, uuid int-array/hex forms, textures-property base64 parse with exact-host + anchored-id gates.
+  Unit tests exist: `bridge/test/head-metadata.test.js`.
+- App rendering (H3, commits `911535e` + `7005328`): tiered sources in `playerHeadTextureTiers()`
+  (`apps/mobile/src/itemTextures.ts:115-129`) — direct `textures.minecraft.net` skin crop, then `mc-heads.net`
+  by uuid, then by name — consumed by `MinecraftItemIcon` with per-source `onError` advance
+  (`MinecraftItemIcon.tsx:77-80`), gated by `EXPO_PUBLIC_HEAD_RENDER_ENABLED` (`appConfig.ts:23-24`, default OFF).
+  Legacy 64x32 skins get the hat-overlay aspect handling (`minecraftSkinAspectRatio`).
+- The lettered fallback ("PH") renders whenever NO source in the tier list loads (`MinecraftItemIcon.tsx:84-97`).
+
+#### 1.8.2 Verified fact: there is no static player_head item texture
+
+Probed 2026-08-08 against the exact URL builder the app uses (`minecraftTextureUrls`, `itemTextures.ts:79-92`):
+`data/<v>/items/player_head.png` and `data/<v>/blocks/player_head.png` return HTTP 404 for v in
+{1.21.11, 1.21.4, 1.21.1} on `raw.githubusercontent.com/PrismarineJS/minecraft-assets/master`, while
+`data/1.21.11/items/diamond_sword.png` returns 200. Consequence: for `player_head` the "static texture" tiers are
+guaranteed dead — the tier list is effectively ONLY the head-metadata tiers. Any head slot whose `head` field is
+absent, or whose head tiers all error, MUST show the PH letter fallback. This exactly matches the simulator
+symptom (ordinary items render; some heads fall back) and is the frame for the matrix below.
+
+#### 1.8.3 PH-fallback root-cause matrix (run top to bottom; verdict rules are observable)
+
+| # | Hypothesis | Where | Observable signal | Verdict rule |
+|---|---|---|---|---|
+| H-A | Bridge flag off: `HEAD_METADATA_ENABLED` unset in the running bridge env | deploy config | EVERY player_head in a WS `window_*` payload lacks `head` | Inspect one frame (simulator: log WS JSON; prod: `DEBUG_GUI_ITEMS` summary) — all-missing => CONFIRMED, fix is config not code |
+| H-B | App flag off: `EXPO_PUBLIC_HEAD_RENDER_ENABLED` unset at build/export time | deploy config | `head` present in WS frames but app never issues textures/mc-heads requests (network tab empty) | Confirm via network inspector; all-or-nothing symptom like H-A |
+| H-C | Extraction miss: the server's decoded `profile` component shape is not covered by `profileRecord()` candidates (e.g. option-wrapped fields, `partial`/`complete` discriminant nesting from the 1.21.11 `ResolvableProfile` mapper, or `skinPatch`-only heads) | `mc-session.ts` | Slot-selective: `componentKeys` contains `profile` but serialized item lacks `head` | H5 shape log shows branch=`none` or reason=`no-profile` for exactly the PH slots => CONFIRMED |
+| H-D | Base64 strictness: `textureIdFromEncodedProfile` rejects values with whitespace/newlines, url-safe alphabet, or non-canonical padding via the canonical re-encode equality check (`mc-session.ts:1602-1603`) | `mc-session.ts` | Slot-selective: `head` absent (or uuid/name-only) though the profile carries a textures property | H5 reason=`bad-base64`/`non-canonical` on PH slots => CONFIRMED; fix in H6 |
+| H-E | Tier exhaustion: extraction succeeded but yields only an anonymous/offline `playerUuid` or placeholder `playerName` — `mc-heads.net` 404s (uuid not premium-resolvable), no textureId tier exists | render path | `head` present on the PH slot; app-side tier trace shows every tier erroring | Dev tier-outcome trace (H5 app half) shows exhaustion => CONFIRMED; fix is H6 terminal tier |
+| H-F | Name-gate rejection: menu heads carrying decorative names that fail `[A-Za-z0-9_]{1,16}` so the name tier is dropped and nothing else exists | both | `head` absent though profile had only a name | H5 reason booleans (`hasName` true, name invalid) => CONFIRMED; behavior is CORRECT (do not loosen the gate), route to H6 terminal tier |
+| H-G | Transient network/outage on textures/mc-heads hosts | environment | PH appears intermittently for slots that rendered before | Retry after connectivity check; not a code defect |
+
+Interpretation order: H-A/H-B first (they are cheap all-or-nothing config checks), then H-C/H-D (bridge-side,
+slot-selective), then H-E/H-F (render-side). "Some slots render, some don't" on one screen rules OUT H-A/H-B for
+that deployment and points at H-C..H-F.
+
+#### 1.8.4 Phase H5 — privacy-safe head diagnostics (implement before any hardening)
+
+Goal: attribute every PH slot to exactly one matrix row WITHOUT logging identities or secrets. Constraint that
+drives the design: profile data IS identity data — player names, UUIDs, and the base64 textures value (which
+decodes to JSON embedding `profileId`/`profileName`) must never appear in logs, counters, or client-bound
+messages. Diagnostics stay on the Mac mini (console + localhost-only `/admin/status`); nothing new is sent to the
+PWA or any third party.
+
+- Known leak to close first: the existing `DEBUG_GUI_ITEMS=1` summarizer (`summarizeItemForDebug`,
+  `mc-session.ts:1640`) prints raw component values truncated at 220 chars (`mc-session.ts:1685`) — for heads that
+  includes the base64 textures prefix, whose decode contains `profileId`/`profileName`, plus raw `name`/`uuid`
+  profile fields. Before H5 QA runs, redact within the summarizer: for any `properties[].value`, any field named
+  `uuid`/`UUID`/`id`/`Id`/`name`/`Name` under a profile/SkullOwner subtree, and any string matching the dashed or
+  32-hex uuid patterns or a base64 `eyJ` JSON prefix, emit `"<redacted:kind:len>"` instead of the value. Structure
+  (keys, types, lengths) remains — shape is what diagnosis needs.
+- New head-shape log, flag `HEAD_DEBUG=1` (bridge env, independent of `DEBUG_GUI_ITEMS`): one line per DISTINCT
+  head shape (dedupe by shape signature, cap 40 like `debugGuiItem`): `{ branch: "componentMap" | "component" |
+  "legacy-nbt" | "none", profileKeys: string[], hasUuid: boolean, hasName: boolean, hasTextures: boolean,
+  nameValid: boolean, uuidValid: boolean, failureReason?: "no-profile" | "bad-base64" | "non-canonical" |
+  "oversize" | "bad-json" | "bad-host" | "bad-id", textureIdHash8?: string }` where `textureIdHash8` is the first
+  8 hex chars of sha256(textureId) — enough to correlate bridge extraction with app-side rendering of the same
+  head, not reversible to the id (the id itself is not secret, but hashing keeps the log free of any value that
+  could be replayed into a URL). `failureReason` requires threading a reason out of the existing never-throw
+  helpers instead of bare `undefined` returns — keep the never-throw contract; reasons are strictly for logs.
+- Aggregate counters in `movement`-style diagnostics surfaced through `/admin/status` (localhost-only,
+  `ws-server.ts` guard `isLocalAdminRequest`): `{ headsSeen, headsWithHeadField, byBranch: {...},
+  byFailureReason: {...} }` — numbers only, no strings from item data.
+- App half (dev builds only, `__DEV__`-gated, no new env flag): per player_head mount, `console.debug` one line
+  when the tier list is exhausted or a tier errors: `{ tiersTried, exhausted, headPresent, textureIdHash8? }` —
+  compute the same sha256 prefix client-side from `head.textureId`; never log uuid/name or URLs. Console only;
+  never transmitted.
+- Files: `bridge/src/mc-session.ts` (redaction + shape log + counters), `bridge/src/session-manager.ts` +
+  `bridge/src/ws-server.ts` (`/admin/status` passthrough), `apps/mobile/src/components/MinecraftItemIcon.tsx`
+  (dev trace). Tests: extend `bridge/test/head-metadata.test.js` — redaction never emits a uuid/name/base64
+  fixture value verbatim; failure reasons map correctly per fixture; counters increment.
+- Rollback: both flags off restores today's behavior; redaction of the existing debug channel is kept (it is a
+  leak fix, not a feature).
+
+#### 1.8.5 Phase H6 — extraction hardening + terminal render tier (each item gated on H5 evidence)
+
+- Base64 tolerance (activate on H-D evidence): before validation, strip ASCII whitespace and translate the
+  url-safe alphabet (`-_` -> `+/`); DROP the canonical re-encode equality check (`mc-session.ts:1602-1603`). The
+  canonicality check was defense-in-depth on an input that is fully re-validated after decode (JSON shape, `https`
+  scheme, exact `textures.minecraft.net` host, anchored 40-64 hex id, no search/hash/credentials) — those gates
+  all stay; the 8 KB pre-decode cap stays.
+- Profile-shape coverage (activate on H-C evidence): extend `profileRecord()`/`componentPayload()` ONLY with
+  shapes actually observed in H5 `profileKeys` logs from the simulator and production runs — no speculative
+  shapes. Each new shape lands with a fixture in `head-metadata.test.js` copied from the (redacted) observed
+  structure with dummy values.
+- Terminal generic-head tier (activate on H-E/H-F evidence, or unconditionally as UX polish): append a final tier
+  to `playerHeadTextureTiers()` for every player_head — a generic Steve-class head from an ALREADY-allowlisted
+  host (candidate: `https://mc-heads.net/avatar/MHF_Steve`; the exact identifier is an implementation detail —
+  whatever is chosen MUST be probed for HTTP 200 during QA from both the simulator and the deployed PWA origin
+  before shipping, since 1.8.2 proves the minecraft-assets path can never backstop heads). Result: the PH letter
+  fallback for player_head becomes an offline-only state. No new hosts are added to the allowlist.
+- Explicitly rejected: loosening the player-name gate (H-F names are decorative, not identities to resolve);
+  adding new texture hosts; logging raw profile payloads to "see what servers send" (H5's shape log answers that
+  privately).
+
+#### 1.8.6 Track 1 acceptance gates
+
+Simulator (local 1.21.11 server per README flow, `HEAD_METADATA_ENABLED=1`, `EXPO_PUBLIC_HEAD_RENDER_ENABLED=1`):
+- S-H1: chest with four heads — (i) textures-property head, (ii) premium-name head, (iii) uuid-only head,
+  (iv) garbage-profile head. PASS = (i) shows its custom texture, (ii) shows the player's face, (iii) shows a
+  face or the H6 generic head, (iv) shows the H6 generic head; ZERO lettered PH cells while online. Evidence:
+  screenshot + `/admin/status` head counters with `headsSeen >= 4`.
+- S-H2 (privacy): run S-H1 with `HEAD_DEBUG=1 DEBUG_GUI_ITEMS=1`; grep the full bridge log for (a) any 32-hex or
+  dashed-uuid string, (b) any `eyJ` base64-JSON prefix, (c) the known test account name. PASS = zero matches
+  outside `<redacted:...>` markers. This gate is mandatory before the flags are ever enabled in production.
+- S-H3 (offline degrade): block `textures.minecraft.net` and `mc-heads.net` (hosts file); heads degrade to the PH
+  letter fallback without layout shift or render loop; restore network, heads recover on next window open.
+
+Production (live server via the deployed PWA + Mac mini bridge):
+- P-H1: open the exact server GUI that exhibited PH slots in the simulator evidence. PASS = every player_head
+  slot renders a head texture (custom, avatar, or generic terminal tier); ANY remaining PH slot must have a
+  same-session H5 log line whose `failureReason` explains it (i.e. zero unexplained fallbacks).
+- P-H2: `/admin/status` (from the mini, localhost) shows `headsWithHeadField / headsSeen` ratio consistent with
+  P-H1; the mini's logs pass the S-H2 grep. No client-visible diagnostics are present in the deployed app
+  (dev-only trace compiled out).
 
 ---
 
@@ -348,6 +480,44 @@ Phase M3 — Hygiene fixes (only after M1 data)
 - Verdict: DIAGNOSIS READY (M1 is pure instrumentation, implement immediately). FIX CONDITIONALLY READY —
   M2/M3 are fully specified but their activation depends on which matrix row the M1 evidence confirms.
 
+### 2.6 Revision: M1 implemented; live position-evidence protocol
+
+#### 2.6.1 Implemented state (verified in this worktree, commit `31561b3`)
+
+`movementDiagnostics()` now reports `movementEpoch`/`teleportEpoch` (fields at `bridge/src/mc-session.ts:93-94`,
+epoch bump at `:651`, `forcedMove` binding at `:280,660`), `epochEvents` per-event counts (`:634-636`),
+`lastPhysicsTickAt` (`:166,272`), `loadedColumns` via `bot.world.getColumns().length` (`:644`), and
+`positionDelta3s` (`:645,687`), all passed through `ManagedSessionSummary`
+(`bridge/src/session-manager.ts:45,244`) to `/admin/status`. Unit tests extended in
+`bridge/test/movement-control.test.js`. The optional client-facing `movement_debug` message from M1 is NOT
+implemented — acceptable: the evidence protocol below reads the admin surface directly and does not need it.
+
+#### 2.6.2 Live position-evidence protocol and acceptance gates
+
+Every movement claim from here on must cite this artifact set — "buttons work" is never again accepted without
+position evidence:
+
+- Artifact A (bridge truth): two `/admin/status` snapshots taken >= 3 s apart while the control is held —
+  `curl -s localhost:8080/admin/status | jq '{t: now, s: [.sessions.sessions[] | {ign, blockLoaded,
+  physicsEnabled, movementEpoch, teleportEpoch, loadedColumns, positionDelta3s, controls}]}'` — saved to files.
+- Artifact B (app truth): the `MovementPanel` coordinate strip before/during/after the press (screenshots or
+  screen recording), which reflects the `position` stream (250 ms cadence).
+- Concordance rule: a run counts as MOVEMENT CONFIRMED only when A and B agree — `positionDelta3s` horizontal
+  distance > 0 in consecutive snapshots AND the app strip shows the same-direction coordinate change. A shows
+  motion but B does not => position stream bug (bridge->app); B shows motion but A does not => impossible, re-take
+  A. Neither => walk the 2.2 matrix with the same snapshots (they contain every signal the matrix needs).
+
+Simulator acceptance gate S-M1 (local 1.21.11 server): hold forward 2 s. PASS = horizontal displacement >= 2
+blocks across Artifacts A+B, motion stops within one position-sync period (250 ms) of release, zero "moved
+wrongly" lines in the server console, and `teleportEpoch === movementEpoch` with `blockLoaded: true` throughout.
+
+Production acceptance gate P-M1 (vmfhf on the live server, `MOVEMENT_ALLOWED_IGNS` set): same press protocol.
+PASS = concordant nonzero displacement. If displacement is zero, the run is still a VALID diagnostic success when
+the snapshots pin exactly one matrix row (A: `blockLoaded:false`; B: `teleportEpoch < movementEpoch` with
+`epochEvents` showing which proxy event bumped it; C: delta oscillates around a fixed point; D: `gameMode`
+non-survival) — that row's verdict then routes M2/M3 or the server-owner escalation per 2.5. "Zero displacement,
+no row pinned" is the only FAIL state, and means the diagnostics themselves need extending.
+
 ---
 
 ## Track 3 — Contextual top-down map (iPhone PWA + Mac mini)
@@ -480,7 +650,31 @@ card. No bridge work. Explicitly out of scope until the owner agrees.
   `stale` by suspending the server process; force `unsupported` by connecting before chunks load; verify frame
   cadence and sizes via `DEBUG` log line per frame (bytes, build ms).
 
-### 3.7 Blockers and readiness
+### 3.7 Acceptance gates (revision)
+
+Nothing in Track 3 is implemented yet; these gates bind the future implementation and are phrased against
+observables only.
+
+Simulator:
+- S-P1 (Stage 1): compass card shows live coordinates/heading matching the F3-equivalent position of the bot on a
+  local server; staleness dot flips to stale within 10 s of suspending the bridge process.
+- S-P2 (Stage 2): with the bot walking via movement controls, the map pans; every frame's DEBUG line reports
+  bytes <= 49,152 and block reads <= 250,000; frame cadence never exceeds 0.5/s; columns outside server view
+  distance render as the unknown palette index; suspending the server flips `map_state` to `stale` <= 12 s;
+  connecting before chunk load yields `unsupported` within 5 s.
+- S-P3 (budget regression): the map-sampler unit suite (3.6) passes in a single run — the 65x65 clamp, read
+  ceiling, slice yield, and exact-frame-size property tests are the executable form of the 3.3 budgets.
+
+Production:
+- P-P1: on the live server, either a live map frame renders (chunks loaded) or the map shows `unsupported`
+  (limbo/void) — BOTH are passes; the fail state is a spinner/blank with neither a frame nor a state message.
+  Cross-check: `unsupported` here must coincide with `blockLoaded:false`/`loadedColumns:0` in the Track 2
+  snapshots (same environment signal, two readouts).
+- P-P2: Mac mini stays healthy under map load — with 2 subscribers active, bridge CPU and memory (Activity
+  Monitor or `ps`) show no monotonic growth over 10 min, and a 3rd `map_subscribe` receives
+  `unsupported/capacity`.
+
+### 3.8 Blockers and readiness
 
 - Same environmental unknown as Track 2 row A: if the live proxy parks players in a void limbo, the map will
   correctly show `unsupported` (that is the designed behavior, and doubles as a diagnostic for movement).
@@ -492,13 +686,20 @@ card. No bridge work. Explicitly out of scope until the owner agrees.
 
 ## Cross-cutting
 
-### Recommended execution order
+### Recommended execution order (revised for current repo state)
 
-1. Track 2 / M1 instrumentation (smallest, unblocks the other decisions with live evidence).
-2. Track 1 / H1 + H3 direct rendering (independent of the movement/map unknowns; pure win for the GUI); H2 only if
-   live QA fails.
-3. Track 3 / P1 (independent), then P2-P4 once M1 confirms chunks load on the live server.
-4. Track 2 / M2-M3 guided by M1 data; escalate to the server owner if matrix rows A/B/C point at the proxy.
+H1, H3, and M1 have landed (`911535e`, `7005328`, `31561b3`). The order for the REMAINING work — written
+model-agnostic: any implementation worker executes it from this document alone, using the cited files, flags, and
+gates, with no dependency on which model/agent runs it:
+
+1. Track 1 / H5 diagnostics + debug-channel redaction (closes the identity-leak in `DEBUG_GUI_ITEMS` and
+   attributes every PH slot to a 1.8.3 matrix row; smallest, highest information).
+2. Track 1 / H6 hardening items, each activated by its H5 evidence rule; then run gates S-H1..3, P-H1..2.
+3. Track 2 / live evidence run per 2.6.2 (simulator S-M1 first, then production P-M1); route M2/M3 or the
+   server-owner escalation from the pinned matrix row.
+4. Track 3 / P1 compass (independent, anytime), then P2-P4 once the P-M1 snapshots confirm chunks load on the
+   live server; bind implementation to the 3.7 gates.
+5. Track 1 / H2 proxy remains deferred (only on a reproducible direct-render failure); H4 optional.
 
 ### Consolidated security/privacy budget table
 
@@ -535,9 +736,9 @@ card. No bridge work. Explicitly out of scope until the owner agrees.
 
 | Track | Verdict |
 |---|---|
-| 1. Player-head textures | READY — implement H1 + H3 now (direct rendering); H2 deferred fallback pending live QA; H4 optional |
-| 2. Movement | M1 READY now; M2/M3 specified, activation contingent on M1 evidence; possible external blocker |
-| 3. Top-down map | Stage 1 READY now; Stage 2 READY, gated on M1 environment confirmation; Stage 3 BLOCKED (external) |
+| 1. Player-head textures | H1+H3 LANDED; H5 diagnostics READY now (with mandatory debug redaction); H6 hardening evidence-gated per 1.8.5; H2 deferred; H4 optional |
+| 2. Movement | M1 LANDED; next step is the 2.6.2 evidence run; M2/M3 activation contingent on the pinned matrix row; possible external blocker |
+| 3. Top-down map | Stage 1 READY now; Stage 2 READY, gated on P-M1 environment confirmation and bound to 3.7 gates; Stage 3 BLOCKED (external) |
 
 ---
 
@@ -564,6 +765,18 @@ card. No bridge work. Explicitly out of scope until the owner agrees.
 - Constraint compliance: this plan's DELIVERABLE is exactly one file (`docs/plans/player-head-movement-map.md`); no
   production code, dependencies, lockfiles, or deployment configuration were touched; budgets are hard-coded
   numbers, not "reasonable limits"; no unbounded chunk dump exists in any stage.
+- Revision self-review (2026-08-08, `task_1d168f29dfb7`): all new claims in sections 1.8/2.6/3.7 were verified
+  against the worktree at `7005328` or by direct probe this session: the minecraft-assets `player_head.png` 404s
+  (vs `diamond_sword.png` 200) were fetched live; every cited line (`config.ts:5`, `appConfig.ts:23-24`,
+  `mc-session.ts:1357/1378/1602-1603/1640/1685`, `itemTextures.ts:79-92/115-129`, `MinecraftItemIcon.tsx:77-97`,
+  epoch/diagnostic fields in `mc-session.ts` and `session-manager.ts:45,244`) was read in the current sources, not
+  recalled. The PH-fallback matrix deliberately front-loads the two config-flag rows because both feature flags
+  default OFF — a deployment where the flags were never set is indistinguishable from an extraction bug without
+  checking them first. Privacy stance tightened: the existing debug channel's identity leak is treated as a
+  defect to fix BEFORE diagnostics run in production, and gate S-H2 makes the no-identities-in-logs property an
+  executable check rather than a promise. No implementation was performed under this revision; the deliverable
+  remains this single document, and all instructions are file/flag/gate-based so any default-routed implementation
+  worker can execute them without model-specific assumptions.
 - Revision self-review (2026-08-08, `task_45fdf66be8eb`): re-checked every budget and readiness statement against
   the coordinator corrections. Direct `textures.minecraft.net` rendering is the default head path everywhere it
   appears (design, phases, security table, execution order, verdicts), with the proxy consistently marked
