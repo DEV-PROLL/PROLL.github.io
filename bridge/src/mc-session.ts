@@ -198,6 +198,7 @@ export class McSession extends EventEmitter {
       "non-canonical": 0,
       oversize: 0,
       "bad-json": 0,
+      "bad-scheme": 0,
       "bad-host": 0,
       "bad-id": 0,
     },
@@ -1850,15 +1851,19 @@ function textureIdFromEncodedProfile(
     } catch {
       return { failureReason: "bad-host" };
     }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return { failureReason: "bad-scheme" };
+    }
     if (
-      url.protocol !== "https:" ||
-      url.host !== "textures.minecraft.net" ||
+      url.hostname !== "textures.minecraft.net" ||
+      url.port ||
       url.username ||
-      url.password ||
-      url.search ||
-      url.hash
+      url.password
     ) {
       return { failureReason: "bad-host" };
+    }
+    if (url.search || url.hash) {
+      return { failureReason: "bad-id" };
     }
     const match = /^\/texture\/([0-9a-f]{40,64})$/.exec(url.pathname);
     return match && TEXTURE_ID_RE.test(match[1])

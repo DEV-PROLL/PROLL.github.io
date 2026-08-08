@@ -757,6 +757,7 @@ function buildAdminStatus(
       "non-canonical": 0,
       oversize: 0,
       "bad-json": 0,
+      "bad-scheme": 0,
       "bad-host": 0,
       "bad-id": 0,
     },
@@ -780,6 +781,7 @@ function buildAdminStatus(
       "non-canonical",
       "oversize",
       "bad-json",
+      "bad-scheme",
       "bad-host",
       "bad-id",
     ] as const) {

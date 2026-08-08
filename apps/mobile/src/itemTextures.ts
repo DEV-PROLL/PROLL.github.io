@@ -126,6 +126,15 @@ export function playerHeadTextureTiers(
   return tiers;
 }
 
+export function nextImageTierIndex(
+  currentIndex: number | null,
+  sourceCount: number,
+): number | null {
+  if (currentIndex === null) return null;
+  const nextIndex = currentIndex + 1;
+  return nextIndex < sourceCount ? nextIndex : null;
+}
+
 const runtimeAssetsBaseUrl =
   typeof globalThis !== "undefined"
     ? globalThis.__MINECRAFT_ASSETS_BASE_URL__

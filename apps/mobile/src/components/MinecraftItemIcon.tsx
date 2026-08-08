@@ -13,6 +13,7 @@ import {
   MINECRAFT_ASSETS_BASE_URL,
   minecraftSkinAspectRatio,
   minecraftTextureUrls,
+  nextImageTierIndex,
   normalizeMinecraftAssetName,
   playerHeadTextureTiers,
   type PlayerHeadMetadata,
@@ -63,19 +64,24 @@ export function MinecraftItemIcon({
   const sourceSignature = textureSources
     .map((source) => `${source.kind}:${source.url}`)
     .join("|");
-  const [textureIndex, setTextureIndex] = useState(0);
+  const [textureIndex, setTextureIndex] = useState<number | null>(
+    textureSources.length > 0 ? 0 : null,
+  );
   const [textureLoaded, setTextureLoaded] = useState(false);
-  const textureSource = textureSources[textureIndex];
+  const textureSource =
+    textureIndex === null ? undefined : textureSources[textureIndex];
 
   useEffect(() => {
-    setTextureIndex(0);
+    setTextureIndex(textureSources.length > 0 ? 0 : null);
     setTextureLoaded(false);
-  }, [sourceSignature]);
+  }, [sourceSignature, textureSources.length]);
 
   const handleLoad = () => setTextureLoaded(true);
   const handleError = () => {
     setTextureLoaded(false);
-    setTextureIndex((current) => current + 1);
+    setTextureIndex((current) =>
+      nextImageTierIndex(current, textureSources.length),
+    );
   };
 
   return (

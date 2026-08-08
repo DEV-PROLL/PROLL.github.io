@@ -204,6 +204,7 @@ export type HeadFailureReason =
   | "non-canonical"
   | "oversize"
   | "bad-json"
+  | "bad-scheme"
   | "bad-host"
   | "bad-id";
 

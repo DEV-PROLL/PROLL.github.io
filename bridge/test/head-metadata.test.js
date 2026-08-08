@@ -86,6 +86,37 @@ test("prioritizes prismarine-item componentMap over generic fallbacks", () => {
   });
 });
 
+test("extracts a namespaced wrapped 1.21.11 componentMap profile", () => {
+  const item = modernHead(undefined);
+  item.componentMap = new Map([
+    [
+      "minecraft:profile",
+      {
+        type: "profile",
+        data: {
+          type: "complete",
+          uuid: PLAYER_UUID.replaceAll("-", ""),
+          name: "Dinnerbone",
+          properties: [
+            {
+              name: "textures",
+              value: encodedTexture(
+                `http://textures.minecraft.net/texture/${TEXTURE_ID}`,
+              ),
+            },
+          ],
+        },
+      },
+    ],
+  ]);
+
+  assert.deepEqual(extractHeadInfo(item), {
+    playerUuid: PLAYER_UUID,
+    playerName: "Dinnerbone",
+    textureId: TEXTURE_ID,
+  });
+});
+
 test("extracts textures from a partial profile without identity", () => {
   const head = extractHeadInfo(
     modernHead({
@@ -113,10 +144,68 @@ test("keeps sanitized partial identity when texture JSON is malformed", () => {
   });
 });
 
-test("rejects hostile, non-https, and invalid texture URLs", () => {
+test("accepts historical HTTP Mojang texture URLs for id parsing", () => {
+  const result = inspectHeadInfo(
+    modernHead({
+      type: "partial",
+      properties: [
+        {
+          name: "textures",
+          value: encodedTexture(
+            `http://textures.minecraft.net/texture/${TEXTURE_ID}`,
+          ),
+        },
+      ],
+    }),
+  );
+
+  assert.deepEqual(result.head, { textureId: TEXTURE_ID });
+  assert.equal(result.diagnostic.failureReason, undefined);
+});
+
+test("classifies rejected texture schemes and hosts without echoing URLs", () => {
+  const cases = [
+    [
+      "bad-scheme",
+      `ftp://textures.minecraft.net/texture/${TEXTURE_ID}`,
+    ],
+    [
+      "bad-host",
+      `https://textures.minecraft.net.evil.com/texture/${TEXTURE_ID}`,
+    ],
+    [
+      "bad-host",
+      `http://evil.example/texture/${TEXTURE_ID}`,
+    ],
+  ];
+
+  for (const [failureReason, url] of cases) {
+    const diagnostic = inspectHeadInfo(
+      modernHead({
+        type: "partial",
+        properties: [{ name: "textures", value: encodedTexture(url) }],
+      }),
+    ).diagnostic;
+    const serialized = JSON.stringify(diagnostic);
+
+    assert.equal(diagnostic.failureReason, failureReason);
+    assert.doesNotMatch(serialized, /textures\.minecraft\.net|evil\.example/);
+    assert.doesNotMatch(serialized, new RegExp(TEXTURE_ID));
+  }
+});
+
+test("rejects texture URL credentials, suffixes, and invalid ids", () => {
   const urls = [
-    `https://textures.minecraft.net.evil.com/texture/${TEXTURE_ID}`,
-    `http://textures.minecraft.net/texture/${TEXTURE_ID}`,
+    `data:image/png;base64,${TEXTURE_ID}`,
+    "file:///etc/passwd",
+    `https://127.0.0.1/texture/${TEXTURE_ID}`,
+    `https://textures.minecraft.net@127.0.0.1/texture/${TEXTURE_ID}`,
+    `https://user@textures.minecraft.net/texture/${TEXTURE_ID}`,
+    `https://textures.minecraft.net/texture/${TEXTURE_ID}?download=1`,
+    `https://textures.minecraft.net/texture/${TEXTURE_ID}#fragment`,
+    `https://textures.minecraft.net/texture/${TEXTURE_ID}/extra`,
+    `https://textures.minecraft.net/texture/${TEXTURE_ID.toUpperCase()}`,
+    `https://textures.minecraft.net/texture/${TEXTURE_ID}0`,
     "https://textures.minecraft.net/texture/not-a-texture-id",
   ];
 
@@ -202,6 +291,24 @@ test("falls back to legacy SkullOwner when profile component is empty", () => {
   };
 
   const result = inspectHeadInfo(item);
+
+  assert.deepEqual(result.head, { playerName: "LegacyUser" });
+  assert.equal(result.diagnostic.branch, "legacy-nbt");
+});
+
+test("extracts lowercase legacy skullOwner string profiles", () => {
+  const result = inspectHeadInfo({
+    name: "player_wall_head",
+    nbt: {
+      type: "compound",
+      value: {
+        skullOwner: {
+          type: "string",
+          value: "LegacyUser",
+        },
+      },
+    },
+  });
 
   assert.deepEqual(result.head, { playerName: "LegacyUser" });
   assert.equal(result.diagnostic.branch, "legacy-nbt");
@@ -311,6 +418,12 @@ test("classifies every texture extraction failure", () => {
       "bad-host",
       encodedTexture(
         `https://textures.minecraft.net.evil.com/texture/${TEXTURE_ID}`,
+      ),
+    ],
+    [
+      "bad-scheme",
+      encodedTexture(
+        `ftp://textures.minecraft.net/texture/${TEXTURE_ID}`,
       ),
     ],
     [

@@ -8,6 +8,7 @@ import {
   minecraftAssetVersion,
   minecraftSkinAspectRatio,
   minecraftTextureUrls,
+  nextImageTierIndex,
   normalizeMinecraftAssetName,
   playerHeadTextureTiers,
   resolveMinecraftAssetsBaseUrl,
@@ -171,6 +172,19 @@ test("selects direct texture then UUID and name avatar tiers", () => {
       },
     ],
   );
+});
+
+test("advances failed image tiers in order and stops after exhaustion", () => {
+  const tiers = playerHeadTextureTiers({
+    textureId: TEXTURE_ID,
+    playerUuid: PLAYER_UUID,
+    playerName: "Dinnerbone",
+  });
+
+  assert.equal(nextImageTierIndex(0, tiers.length), 1);
+  assert.equal(nextImageTierIndex(1, tiers.length), 2);
+  assert.equal(nextImageTierIndex(2, tiers.length), null);
+  assert.equal(nextImageTierIndex(null, tiers.length), null);
 });
 
 test("skips invalid player-head tiers without echoing hostile input", () => {
