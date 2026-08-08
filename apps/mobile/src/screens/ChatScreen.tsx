@@ -32,6 +32,7 @@ import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
 import { MinecraftItemIcon } from "../components/MinecraftItemIcon";
 import { MovementPanel } from "../components/MovementPanel";
+import { PositionCompass } from "../components/PositionCompass";
 import { MOVEMENT_PANEL_ENABLED, MOVEMENT_TEST_IGN } from "../appConfig";
 
 interface Props {
@@ -812,6 +813,7 @@ export function ChatScreen({
         </View>
 
         {playerVitals ? <VitalsStrip vitals={playerVitals} /> : null}
+        <PositionCompass connected={serverInfo.connected} position={position} />
         {bossBars.length > 0 ? <BossBarStack bars={bossBars} /> : null}
         {titleOverlay ? <TitleOverlay overlay={titleOverlay} /> : null}
         {actionBar ? (
