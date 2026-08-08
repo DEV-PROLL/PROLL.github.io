@@ -13,6 +13,7 @@ import {
   MovementRateGate,
   parseMovementControlMessage,
 } from "./movement-control";
+import { isAdminRequestAllowed } from "./admin-access";
 
 const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 const PENDING_LOGIN_TTL_MS = 20 * 60 * 1000;
@@ -466,7 +467,7 @@ async function handleHttpRequest(
   }
 
   if (url.pathname === "/admin/status") {
-    if (!isLocalAdminRequest(req)) {
+    if (!isAdminRequestAllowed(req.socket.remoteAddress, req.headers.host, req.headers)) {
       res.writeHead(404, { ...headers, "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "not found" }));
       return;
@@ -481,7 +482,7 @@ async function handleHttpRequest(
   }
 
   if (url.pathname === "/admin/dashboard") {
-    if (!isLocalAdminRequest(req)) {
+    if (!isAdminRequestAllowed(req.socket.remoteAddress, req.headers.host, req.headers)) {
       res.writeHead(404, { ...headers, "Content-Type": "text/plain; charset=utf-8" });
       res.end("not found");
       return;
@@ -620,46 +621,6 @@ function clientIpKey(req: http.IncomingMessage): string {
 function headerValue(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? "";
   return value ?? "";
-}
-
-function isLocalAdminRequest(req: http.IncomingMessage): boolean {
-  return (
-    isLoopbackAddress(req.socket.remoteAddress) &&
-    hasLocalHostHeader(req.headers.host) &&
-    !hasProxyForwardingHeaders(req.headers)
-  );
-}
-
-function isLoopbackAddress(address: string | undefined): boolean {
-  if (!address) return false;
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
-}
-
-function hasLocalHostHeader(host: string | undefined): boolean {
-  if (!host) return false;
-  const normalized = host.trim().toLowerCase();
-  return (
-    normalized === "localhost" ||
-    normalized.startsWith("localhost:") ||
-    normalized === "127.0.0.1" ||
-    normalized.startsWith("127.0.0.1:") ||
-    normalized === "[::1]" ||
-    normalized.startsWith("[::1]:")
-  );
-}
-
-function hasProxyForwardingHeaders(headers: http.IncomingHttpHeaders): boolean {
-  return [
-    "cf-connecting-ip",
-    "cf-ray",
-    "cf-visitor",
-    "cdn-loop",
-    "forwarded",
-    "x-forwarded-for",
-    "x-forwarded-host",
-    "x-forwarded-proto",
-    "x-real-ip",
-  ].some((name) => headers[name] !== undefined);
 }
 
 function rawDataSize(data: RawData): number {
