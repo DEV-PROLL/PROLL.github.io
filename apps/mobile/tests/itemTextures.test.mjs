@@ -142,6 +142,18 @@ test("adds material fallbacks for model-rendered GUI items", () => {
     minecraftTextureUrls(baseUrl, "1.21.11", "decorated_pot").at(-1),
     "https://assets.example.test/root/data/1.21.11/blocks/terracotta.png",
   );
+  assert.equal(
+    minecraftTextureUrls(baseUrl, "1.21.11", "black_stained_glass_pane").at(-1),
+    "https://assets.example.test/root/data/1.21.11/blocks/black_stained_glass.png",
+  );
+  assert.equal(
+    minecraftTextureUrls(baseUrl, "1.21.11", "grass_block").at(-1),
+    "https://assets.example.test/root/data/1.21.11/blocks/grass_block_top.png",
+  );
+  assert.equal(
+    minecraftTextureUrls(baseUrl, "1.21.11", "compass").at(-1),
+    "https://assets.example.test/root/data/1.21.11/items/compass_16.png",
+  );
 });
 
 test("does not build texture URLs for invalid resource inputs", () => {

@@ -93,8 +93,8 @@ export function minecraftTextureUrls(
     `${textureRoot}/items/${normalizedName}.png`,
     `${textureRoot}/blocks/${normalizedName}.png`,
   ];
-  const fallbackName = fallbackBlockTextureName(normalizedName);
-  if (fallbackName) urls.push(`${textureRoot}/blocks/${fallbackName}.png`);
+  const fallbackPath = fallbackTexturePath(normalizedName);
+  if (fallbackPath) urls.push(`${textureRoot}/${fallbackPath}.png`);
   return urls;
 }
 
@@ -116,10 +116,22 @@ export function minecraftSpecialItemTexture(
   };
 }
 
-function fallbackBlockTextureName(itemName: string): string | null {
+function fallbackTexturePath(itemName: string): string | null {
   const coloredItem = /^([a-z_]+)_(bed|banner)$/.exec(itemName);
-  if (coloredItem) return `${coloredItem[1]}_wool`;
-  if (itemName === "decorated_pot") return "terracotta";
+  if (coloredItem) return `blocks/${coloredItem[1]}_wool`;
+
+  const stainedGlassPane = /^([a-z_]+)_stained_glass_pane$/.exec(itemName);
+  if (stainedGlassPane) return `blocks/${stainedGlassPane[1]}_stained_glass`;
+
+  const aliases: Readonly<Record<string, string>> = {
+    glass_pane: "blocks/glass",
+    grass_block: "blocks/grass_block_top",
+    decorated_pot: "blocks/terracotta",
+    compass: "items/compass_16",
+    recovery_compass: "items/recovery_compass_00",
+    clock: "items/clock_00",
+  };
+  if (aliases[itemName]) return aliases[itemName];
   return null;
 }
 
