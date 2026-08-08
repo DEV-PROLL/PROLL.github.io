@@ -51,6 +51,11 @@ GUI 아이템 텍스처 미러를 바꾸려면 `/data/<버전>/items`와 `/block
 
 PWA는 WebSocket을 열기 전에 `https://bridge.proit.kr/client-ticket`에서 짧은 수명의 1회용 티켓을 받아 `wss://bridge.proit.kr?ticket=...`로 접속한다. 그래서 웹 번들 안에 장기 `BRIDGE_TOKEN`을 넣지 않는다.
 
+웹 이동 패널에서 주변 지도를 표시하려면 빌드 변수
+`EXPO_PUBLIC_MAP_ENABLED=true`를 설정한다. 이 공개 값은 UI 게이트일 뿐이며,
+브릿지에서는 별도로 `MAP_ENABLED=true`를 설정해야 한다. 토큰은 이 변수에
+넣지 않는다.
+
 `npm run web:export` 후 준비 스크립트는 GitHub Pages 호환을 위해 `.nojekyll`을 만들고, Expo JS 번들을 루트 `app.js?v=<bundle-hash>`로 복사한다. 배포 직후 오래된 화면이 계속 보이면 Safari/Chrome 새로고침, 홈 화면 앱 재추가, 또는 브라우저 사이트 데이터 삭제를 확인한다.
 
 ## 빌드

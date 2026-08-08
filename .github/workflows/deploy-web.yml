@@ -57,6 +57,7 @@ jobs:
           EXPO_PUBLIC_HEAD_RENDER_ENABLED: ${{ vars.EXPO_PUBLIC_HEAD_RENDER_ENABLED }}
           EXPO_PUBLIC_MOVEMENT_ENABLED: ${{ vars.EXPO_PUBLIC_MOVEMENT_ENABLED }}
           EXPO_PUBLIC_MOVEMENT_TEST_IGN: ${{ vars.EXPO_PUBLIC_MOVEMENT_TEST_IGN }}
+          EXPO_PUBLIC_MAP_ENABLED: ${{ vars.EXPO_PUBLIC_MAP_ENABLED }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

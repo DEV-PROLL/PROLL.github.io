@@ -61,6 +61,8 @@ export function loadConfig(): BridgeConfig {
     movementAllowedIgns: csv("MOVEMENT_ALLOWED_IGNS"),
     headMetadataEnabled: HEAD_METADATA_ENABLED,
     headDebugEnabled: HEAD_DEBUG_ENABLED,
+    mapEnabled: process.env.MAP_ENABLED === "true" || process.env.MAP_ENABLED === "1",
+    mapMaxSubscribers: positiveInt("MAP_MAX_SUBSCRIBERS", 2),
   };
 }
 

@@ -10,6 +10,8 @@ interface MovementPanelSessionIO {
   send: (message: ClientMessage) => boolean;
   setActiveControls: (controls: ReadonlySet<MovementControl>) => void;
   clearPosition: () => void;
+  clearMap: () => void;
+  mapEnabled: boolean;
   startHeartbeat: (callback: () => void) => unknown;
   stopHeartbeat: (timer: unknown) => void;
 }
@@ -28,6 +30,7 @@ export class MovementPanelSession {
   private available = false;
   private active = false;
   private subscribed = false;
+  private mapSubscribed = false;
   private disposed = false;
 
   constructor(io: MovementPanelSessionIO) {
@@ -48,6 +51,9 @@ export class MovementPanelSession {
     if (this.disposed || !this.available || this.active) return;
     this.active = true;
     this.subscribed = this.io.send({ type: "position_subscribe" });
+    if (this.io.mapEnabled) {
+      this.mapSubscribed = this.io.send({ type: "map_subscribe" });
+    }
   }
 
   suspend(): void {
@@ -116,7 +122,14 @@ export class MovementPanelSession {
       this.io.send({ type: "position_unsubscribe" });
       this.subscribed = false;
     }
-    if (notify) this.io.clearPosition();
+    if (this.mapSubscribed) {
+      this.io.send({ type: "map_unsubscribe" });
+      this.mapSubscribed = false;
+    }
+    if (notify) {
+      this.io.clearPosition();
+      this.io.clearMap();
+    }
   }
 
   private clearControl(control: MovementControl): void {

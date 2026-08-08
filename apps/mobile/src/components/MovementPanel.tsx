@@ -7,6 +7,7 @@ import {
   View,
 } from "react-native";
 import { MOVEMENT_PANEL_ENABLED } from "../appConfig";
+import type { MapViewState } from "../mapFrame";
 import type {
   ClientMessage,
   MovementControl,
@@ -17,12 +18,16 @@ import {
   movementControlPressHandlers,
 } from "../movementPanelSession";
 import { styles, webHoldSafeStyle } from "./MovementPanel.styles";
+import { TopDownMap } from "./TopDownMap";
 
 interface MovementPanelProps {
   connected: boolean;
   position: PlayerPosition | null;
+  map: MapViewState;
+  mapEnabled: boolean;
   send: (message: ClientMessage) => boolean;
   onPositionReset: () => void;
+  onMapReset: () => void;
   enabled?: boolean;
 }
 
@@ -44,8 +49,11 @@ const CONTROLS: readonly ControlButton[] = [
 export function MovementPanel({
   connected,
   position,
+  map,
+  mapEnabled,
   send,
   onPositionReset,
+  onMapReset,
   enabled = MOVEMENT_PANEL_ENABLED,
 }: MovementPanelProps) {
   const [activeControls, setActiveControls] = useState<ReadonlySet<MovementControl>>(
@@ -53,12 +61,15 @@ export function MovementPanel({
   );
   const sendRef = useRef(send);
   const resetPositionRef = useRef(onPositionReset);
+  const resetMapRef = useRef(onMapReset);
   const sessionRef = useRef<MovementPanelSession | null>(null);
   if (!sessionRef.current) {
     sessionRef.current = new MovementPanelSession({
       send: (message) => sendRef.current(message),
       setActiveControls,
       clearPosition: () => resetPositionRef.current(),
+      clearMap: () => resetMapRef.current(),
+      mapEnabled,
       startHeartbeat: (callback) => setInterval(callback, 500),
       stopHeartbeat: (timer) => {
         clearInterval(timer as ReturnType<typeof setInterval>);
@@ -70,7 +81,8 @@ export function MovementPanel({
   useEffect(() => {
     sendRef.current = send;
     resetPositionRef.current = onPositionReset;
-  }, [onPositionReset, send]);
+    resetMapRef.current = onMapReset;
+  }, [onMapReset, onPositionReset, send]);
 
   useEffect(() => {
     session.setAvailable(enabled && connected);
@@ -119,6 +131,8 @@ export function MovementPanel({
         <Text style={styles.coordinates}>{formatCoordinates(position)}</Text>
         <Text style={styles.meta}>{formatPositionMeta(position)}</Text>
       </View>
+
+      {mapEnabled ? <TopDownMap map={map} position={position} /> : null}
 
       <View style={styles.controls}>
         <View style={styles.dpad}>

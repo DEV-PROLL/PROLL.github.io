@@ -25,6 +25,8 @@
 | `MAX_SESSIONS` | 동시 봇 수 상한 |
 | `CHAT_RATE_LIMIT` | 유저당 초당 채팅 횟수 |
 | `SESSION_GRACE_MS` | 앱 WebSocket이 끊긴 뒤 봇 세션을 유지할 시간. 기본값 `1800000`(30분). 명시적 `logout`은 즉시 퇴장 |
+| `MAP_ENABLED` | 이미 로드된 청크만 읽는 2D 미니맵. 기본값 `false` |
+| `MAP_MAX_SUBSCRIBERS` | 브릿지 전체 동시 미니맵 구독 상한. 기본값 `2` |
 
 ## 실행
 

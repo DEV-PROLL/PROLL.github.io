@@ -32,7 +32,16 @@ import { useBridge, type ConnectionState } from "../hooks/useBridge";
 import { MinecraftHead, StatusPill } from "../components/RudulgiUI";
 import { MinecraftItemIcon } from "../components/MinecraftItemIcon";
 import { MovementPanel } from "../components/MovementPanel";
-import { MOVEMENT_PANEL_ENABLED, MOVEMENT_TEST_IGN } from "../appConfig";
+import {
+  MAP_ENABLED,
+  MOVEMENT_PANEL_ENABLED,
+  MOVEMENT_TEST_IGN,
+} from "../appConfig";
+import {
+  EMPTY_MAP_VIEW,
+  applyMapMessage,
+  type MapViewState,
+} from "../mapFrame";
 
 interface Props {
   bridgeUrl: string;
@@ -127,6 +136,7 @@ export function ChatScreen({
   const [appInfoOpen, setAppInfoOpen] = useState(false);
   const [movementOpen, setMovementOpen] = useState(false);
   const [position, setPosition] = useState<PlayerPosition | null>(null);
+  const [mapView, setMapView] = useState<MapViewState>(EMPTY_MAP_VIEW);
   const [bossBars, setBossBars] = useState<BossBarSummary[]>([]);
   const [playerVitals, setPlayerVitals] = useState<PlayerVitals | null>(null);
   const [actionBar, setActionBar] = useState<ActionBarState | null>(null);
@@ -161,6 +171,7 @@ export function ChatScreen({
     movementOpenRef.current = false;
     setMovementOpen(false);
     setPosition(null);
+    setMapView(EMPTY_MAP_VIEW);
   }, []);
 
   useEffect(() => {
@@ -316,6 +327,11 @@ export function ChatScreen({
             ts: msg.ts,
           });
           break;
+        case "map_frame":
+        case "map_state":
+          if (!movementOpenRef.current) break;
+          setMapView((current) => applyMapMessage(current, msg));
+          break;
         case "action_bar":
           setActionBar({ text: msg.text, segments: msg.segments, ts: msg.ts });
           if (actionBarTimerRef.current) clearTimeout(actionBarTimerRef.current);
@@ -433,8 +449,7 @@ export function ChatScreen({
           setSelectedWindowSlot(null);
           setPreviewWindowSlot(null);
           setPendingSlot(null);
-          setPosition(null);
-          setMovementOpen(false);
+          resetMovementPanel();
           clearTransientOverlays();
           setServerInfo((prev) => ({
             ...prev,
@@ -746,6 +761,7 @@ export function ChatScreen({
     resetMovementPanel();
     send({ type: "movement_stop_all" });
     send({ type: "position_unsubscribe" });
+    send({ type: "map_unsubscribe" });
     send({ type: "logout" });
     onLogout();
   };
@@ -754,6 +770,7 @@ export function ChatScreen({
     movementOpenRef.current = false;
     send({ type: "movement_stop_all" });
     send({ type: "position_unsubscribe" });
+    send({ type: "map_unsubscribe" });
     resetMovementPanel();
   }, [resetMovementPanel, send]);
 
@@ -993,6 +1010,7 @@ export function ChatScreen({
             setOverflowOpen(false);
             movementOpenRef.current = true;
             setPosition(null);
+            setMapView(EMPTY_MAP_VIEW);
             setMovementOpen(true);
           }}
           onExitServer={handleExitServer}
@@ -1002,8 +1020,11 @@ export function ChatScreen({
           <MovementModal
             connected={state === "open" && serverInfo.connected}
             position={position}
+            map={mapView}
+            mapEnabled={MAP_ENABLED}
             send={send}
             onPositionReset={() => setPosition(null)}
+            onMapReset={() => setMapView(EMPTY_MAP_VIEW)}
             onClose={closeMovement}
           />
         ) : null}
@@ -1758,14 +1779,20 @@ function OverflowMenuModal({
 function MovementModal({
   connected,
   position,
+  map,
+  mapEnabled,
   send,
   onPositionReset,
+  onMapReset,
   onClose,
 }: {
   connected: boolean;
   position: PlayerPosition | null;
+  map: MapViewState;
+  mapEnabled: boolean;
   send: ReturnType<typeof useBridge>["send"];
   onPositionReset: () => void;
+  onMapReset: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1790,13 +1817,21 @@ function MovementModal({
               <Text style={styles.movementCloseText}>×</Text>
             </Pressable>
           </View>
-          <MovementPanel
-            connected={connected}
-            position={position}
-            send={send}
-            onPositionReset={onPositionReset}
-            enabled
-          />
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            style={styles.movementScroll}
+          >
+            <MovementPanel
+              connected={connected}
+              position={position}
+              map={map}
+              mapEnabled={mapEnabled}
+              send={send}
+              onPositionReset={onPositionReset}
+              onMapReset={onMapReset}
+              enabled
+            />
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -2984,6 +3019,9 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 4,
     paddingBottom: 12,
+  },
+  movementScroll: {
+    flexShrink: 1,
   },
   movementHeaderCopy: {
     flex: 1,

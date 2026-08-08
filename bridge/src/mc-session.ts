@@ -33,6 +33,8 @@ import {
 } from "./movement-control";
 import { headingFromMineflayerYaw } from "./position-direction";
 import { HEAD_DEBUG_ENABLED, HEAD_METADATA_ENABLED } from "./config";
+import { MapSubscriptionSession } from "./map-subscription-session";
+import { MineflayerMapSource } from "./mineflayer-map-source";
 
 type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
 type BossBarsMessage = Extract<ServerMessage, { type: "boss_bars" }>;
@@ -164,6 +166,7 @@ export class McSession extends EventEmitter {
   private readonly suppressedBossBarIds = new Set<string>();
   private readonly movementLeases = new MovementLeaseBook();
   private readonly positionSubscriptions = new Map<string, PositionSubscription>();
+  private readonly mapSubscriptions: MapSubscriptionSession;
   private positionTimer: NodeJS.Timeout | null = null;
   private movementWatchdogTimer: NodeJS.Timeout | null = null;
   private movementEpoch = 0;
@@ -220,6 +223,17 @@ export class McSession extends EventEmitter {
     private readonly now: () => number = Date.now,
   ) {
     super();
+    const mapSource = new MineflayerMapSource(() => this.bot, this.now);
+    this.mapSubscriptions = new MapSubscriptionSession({
+      now: this.now,
+      snapshot: () => mapSource.snapshot(),
+      sample: (snapshot, radius, signal) =>
+        mapSource.sample(snapshot, radius, signal),
+      startPolling: (callback, intervalMs) =>
+        setInterval(() => void callback(), intervalMs),
+      stopPolling: (timer) =>
+        clearInterval(timer as ReturnType<typeof setInterval>),
+    });
   }
 
   start(): void {
@@ -321,6 +335,9 @@ export class McSession extends EventEmitter {
     bot.on("death", () => this.recordMovementEpoch("death"));
     bot.on("mount", () => this.recordMovementEpoch("mount"));
     bot.on("forcedMove", () => this.recordForcedMove());
+    bot.on("blockUpdate", () => this.mapSubscriptions.markDirty());
+    bot.on("chunkColumnLoad", () => this.mapSubscriptions.markDirty());
+    bot.on("chunkColumnUnload", () => this.mapSubscriptions.markDirty());
 
     const emitBossBarsSoon = (bar?: { entityUUID?: string }) => {
       if (typeof bar?.entityUUID === "string") {
@@ -422,6 +439,7 @@ export class McSession extends EventEmitter {
       console.warn(`[mc-session] kicked reason=${normalized}`);
       this.stopAllMovement();
       this.clearPositionSubscriptions();
+      this.mapSubscriptions.clear();
       this.emitMsg({
         type: "kicked",
         reason: normalized,
@@ -476,6 +494,7 @@ export class McSession extends EventEmitter {
 
     client.on("start_configuration", () => {
       this.recordMovementEpoch("start_configuration");
+      this.mapSubscriptions.suspend("configuration");
       dedupeProtocolOnceListeners(clientEmitter, [
         "select_known_packs",
         "code_of_conduct",
@@ -493,6 +512,8 @@ export class McSession extends EventEmitter {
 
     client.on("finish_configuration", () => {
       this.clearConfigurationRestartWatchdog();
+      this.mapSubscriptions.markDirty();
+      this.mapSubscriptions.resume();
     });
 
     client.on("store_cookie", (packet: { key?: string; value?: Buffer }) => {
@@ -860,6 +881,7 @@ export class McSession extends EventEmitter {
     this.stopAntiAfk();
     this.stopAllMovement();
     this.clearPositionSubscriptions();
+    this.mapSubscriptions.clear();
     this.clearConfigurationRestartWatchdog();
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
@@ -886,6 +908,7 @@ export class McSession extends EventEmitter {
     this.stopAntiAfk();
     this.stopAllMovement();
     this.clearPositionSubscriptions();
+    this.mapSubscriptions.clear();
     this.clearConfigurationRestartWatchdog();
     this.stopPacketActivityWatchdog();
     this.detachGuiWindow();
@@ -1120,6 +1143,18 @@ export class McSession extends EventEmitter {
   stopPositionSubscriptionForClient(clientId: string): void {
     if (!this.positionSubscriptions.delete(clientId)) return;
     if (this.positionSubscriptions.size === 0) this.stopPositionSync();
+  }
+
+  startMapSubscriptionForClient(
+    clientId: string,
+    listener: (message: ServerMessage) => void,
+    radius?: number,
+  ): void {
+    this.mapSubscriptions.start(clientId, listener, radius);
+  }
+
+  stopMapSubscriptionForClient(clientId: string): void {
+    this.mapSubscriptions.stop(clientId);
   }
 
   positionSubscriberCount(): number {

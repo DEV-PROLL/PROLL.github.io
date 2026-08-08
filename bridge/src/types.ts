@@ -22,6 +22,8 @@ export type ClientMessage =
   | { type: "movement_stop_all" }
   | { type: "position_subscribe" }
   | { type: "position_unsubscribe" }
+  | { type: "map_subscribe"; radius?: number }
+  | { type: "map_unsubscribe" }
   | { type: "forget_account"; userId: string }
   | { type: "logout" }
   | { type: "ping" };
@@ -115,6 +117,27 @@ export type ServerMessage =
       direction: CompassDirection;
       dimension?: string;
       grounded?: boolean;
+      ts: number;
+    }
+  | {
+      type: "map_frame";
+      centerX: number;
+      centerZ: number;
+      radius: number;
+      step: number;
+      dimension: string;
+      cols: number;
+      rows: number;
+      palette: readonly string[];
+      cells: string;
+      heading: number;
+      stale: boolean;
+      ts: number;
+    }
+  | {
+      type: "map_state";
+      state: "loading" | "live" | "stale" | "unsupported";
+      reason?: string;
       ts: number;
     }
   | {
@@ -254,4 +277,6 @@ export interface BridgeConfig {
   movementAllowedIgns: string[];
   headMetadataEnabled: boolean;
   headDebugEnabled: boolean;
+  mapEnabled: boolean;
+  mapMaxSubscribers: number;
 }

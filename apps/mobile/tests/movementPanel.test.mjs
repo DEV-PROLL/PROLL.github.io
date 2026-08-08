@@ -5,12 +5,13 @@ import {
   movementControlPressHandlers,
 } from "../src/movementPanelSession.ts";
 
-function sessionFixture() {
+function sessionFixture(mapEnabled = false) {
   const messages = [];
   const activeStates = [];
   const timers = new Map();
   let nextTimer = 1;
   let positionClearCount = 0;
+  let mapClearCount = 0;
   let sendResult = true;
   const session = new MovementPanelSession({
     send(message) {
@@ -23,6 +24,10 @@ function sessionFixture() {
     clearPosition() {
       positionClearCount += 1;
     },
+    clearMap() {
+      mapClearCount += 1;
+    },
+    mapEnabled,
     startHeartbeat(callback) {
       const timer = nextTimer;
       nextTimer += 1;
@@ -39,11 +44,39 @@ function sessionFixture() {
     session,
     timers,
     positionClearCount: () => positionClearCount,
+    mapClearCount: () => mapClearCount,
     setSendResult(value) {
       sendResult = value;
     },
   };
 }
+
+test("map and position subscriptions share the panel lifecycle", () => {
+  // Given
+  const fixture = sessionFixture(true);
+
+  // When
+  fixture.session.setAvailable(true);
+  fixture.session.suspend();
+  fixture.session.resume();
+  fixture.session.dispose();
+
+  // Then
+  assert.deepEqual(fixture.messages, [
+    { type: "position_subscribe" },
+    { type: "map_subscribe" },
+    { type: "movement_stop_all" },
+    { type: "position_unsubscribe" },
+    { type: "map_unsubscribe" },
+    { type: "position_subscribe" },
+    { type: "map_subscribe" },
+    { type: "movement_stop_all" },
+    { type: "position_unsubscribe" },
+    { type: "map_unsubscribe" },
+  ]);
+  assert.equal(fixture.positionClearCount(), 1);
+  assert.equal(fixture.mapClearCount(), 1);
+});
 
 test("movement panel subscribes only while available", () => {
   // Given

@@ -20,6 +20,7 @@ import {
   parseMovementControlMessage,
 } from "./movement-control";
 import { isAdminRequestAllowed } from "./admin-access";
+import { MapSubscriptionGate } from "./map-subscription-control";
 
 const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 const PENDING_LOGIN_TTL_MS = 20 * 60 * 1000;
@@ -188,6 +189,7 @@ export function startWsServer(
   const clientTickets = new Map<string, ClientTicket>();
   const rateLimits = new Map<string, RateLimitBucket>();
   const movementRateGate = new MovementRateGate();
+  const mapSubscriptionGate = new MapSubscriptionGate(cfg.mapMaxSubscribers);
 
   const httpServer = http.createServer((req, res) => {
     void handleHttpRequest(
@@ -291,6 +293,7 @@ export function startWsServer(
         pendingLogins,
         stats,
         movementRateGate,
+        mapSubscriptionGate,
       ).catch((err) => {
         send({ type: "error", text: err?.message ?? String(err) });
       });
@@ -299,7 +302,9 @@ export function startWsServer(
     ws.on("close", () => {
       state.mcSession?.stopMovementForClient(state.sessionKey);
       state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
+      state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
       movementRateGate.clear(state.sessionKey);
+      mapSubscriptionGate.clear(state.sessionKey);
       stats.activeWs = Math.max(0, stats.activeWs - 1);
       if (state.authenticatedUserId) {
         stats.authenticatedWsCloses += 1;
@@ -317,7 +322,9 @@ export function startWsServer(
       // Mirror close cleanup; ws will fire 'close' too but be defensive.
       state.mcSession?.stopMovementForClient(state.sessionKey);
       state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
+      state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
       movementRateGate.clear(state.sessionKey);
+      mapSubscriptionGate.clear(state.sessionKey);
       if (state.sessionId && state.listener) {
         sessions.detach(state.sessionId, state.listener);
         state.listener = null;
@@ -817,6 +824,8 @@ function buildAdminStatus(
       movementAllowedIgnCount: cfg.movementAllowedIgns.length,
       headMetadataEnabled: cfg.headMetadataEnabled,
       headDebugEnabled: cfg.headDebugEnabled,
+      mapEnabled: cfg.mapEnabled,
+      mapMaxSubscribers: cfg.mapMaxSubscribers,
       rateWindowMs: RATE_WINDOW_MS,
       rateLimits: {
         wsUpgrade: WS_UPGRADE_RATE_LIMIT,
@@ -1194,6 +1203,7 @@ async function handleMessage(
   pendingLogins: Map<string, PendingLogin>,
   stats: RuntimeStats,
   movementRateGate: MovementRateGate,
+  mapSubscriptionGate: MapSubscriptionGate,
 ): Promise<void> {
   switch (msg.type) {
     case "ping":
@@ -1228,9 +1238,16 @@ async function handleMessage(
         if (!isClientOpen(state)) return;
         stats.deviceLoginCompletions += 1;
         state.pendingLoginRequestId = null;
-        attachToSession(result, target, state, send, sessions, stats, {
-          rebuildExisting: true,
-        });
+        attachToSession(
+          result,
+          target,
+          state,
+          send,
+          sessions,
+          stats,
+          mapSubscriptionGate,
+          { rebuildExisting: true },
+        );
       } catch (err) {
         pending.expiresAt = Date.now() + PENDING_LOGIN_RESULT_TTL_MS;
         if (!isClientOpen(state)) return;
@@ -1256,7 +1273,15 @@ async function handleMessage(
         return;
       }
       stats.cachedAuths += 1;
-      attachToSession(cached, target, state, send, sessions, stats);
+      attachToSession(
+        cached,
+        target,
+        state,
+        send,
+        sessions,
+        stats,
+        mapSubscriptionGate,
+      );
       return;
     }
 
@@ -1369,6 +1394,47 @@ async function handleMessage(
       return;
     }
 
+    case "map_subscribe": {
+      if (!state.mcSession) {
+        send({ type: "error", text: "not authenticated" });
+        return;
+      }
+      if (!cfg.mapEnabled) {
+        send({
+          type: "map_state",
+          state: "unsupported",
+          reason: "disabled",
+          ts: Date.now(),
+        });
+        return;
+      }
+      const admission = mapSubscriptionGate.subscribe(
+        state.sessionKey,
+        Date.now(),
+      );
+      if (!admission.allowed) {
+        send({
+          type: "map_state",
+          state: "unsupported",
+          reason: admission.reason,
+          ts: Date.now(),
+        });
+        return;
+      }
+      state.mcSession.startMapSubscriptionForClient(
+        state.sessionKey,
+        send,
+        msg.radius,
+      );
+      return;
+    }
+
+    case "map_unsubscribe": {
+      state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
+      mapSubscriptionGate.unsubscribe(state.sessionKey);
+      return;
+    }
+
     case "forget_account": {
       const userId = msg.userId.trim();
       if (!userId) {
@@ -1378,6 +1444,8 @@ async function handleMessage(
       if (state.sessionId && state.listener) {
         state.mcSession?.stopMovementForClient(state.sessionKey);
         state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
+        state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
+        mapSubscriptionGate.clear(state.sessionKey);
         sessions.detach(state.sessionId, state.listener);
         state.listener = null;
         state.mcSession = null;
@@ -1398,6 +1466,8 @@ async function handleMessage(
       if (state.sessionId && state.listener) {
         state.mcSession?.stopMovementForClient(state.sessionKey);
         state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
+        state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
+        mapSubscriptionGate.clear(state.sessionKey);
         sessions.detach(state.sessionId, state.listener);
         sessions.forceClose(state.sessionId);
         state.listener = null;
@@ -1499,13 +1569,16 @@ function attachToSession(
   send: (m: ServerMessage) => void,
   sessions: SessionManager,
   stats: RuntimeStats,
+  mapSubscriptionGate: MapSubscriptionGate,
   options: { rebuildExisting?: boolean } = {},
 ): void {
-  detachClientSession(state, sessions);
+  detachClientSession(state, sessions, mapSubscriptionGate);
 
   const listener = (m: ServerMessage) => {
     send(m);
     if (m.type === "status" && !m.connected) {
+      state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
+      mapSubscriptionGate.unsubscribe(state.sessionKey);
       state.mcSession = null;
       state.userId = null;
       // Keep sessionId/listener until the next attach or WS close so the
@@ -1546,10 +1619,16 @@ function attachToSession(
   }
 }
 
-function detachClientSession(state: ClientState, sessions: SessionManager): void {
+function detachClientSession(
+  state: ClientState,
+  sessions: SessionManager,
+  mapSubscriptionGate: MapSubscriptionGate,
+): void {
   if (!state.sessionId || !state.listener) return;
   state.mcSession?.stopMovementForClient(state.sessionKey);
   state.mcSession?.stopPositionSubscriptionForClient(state.sessionKey);
+  state.mcSession?.stopMapSubscriptionForClient(state.sessionKey);
+  mapSubscriptionGate.clear(state.sessionKey);
   sessions.detach(state.sessionId, state.listener);
   state.listener = null;
   state.mcSession = null;

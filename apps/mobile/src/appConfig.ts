@@ -23,6 +23,14 @@ const headRenderFeature =
 export const HEAD_RENDER_ENABLED =
   headRenderFeature === "1" || headRenderFeature === "true";
 
+const mapFeature =
+  typeof process !== "undefined"
+    ? process.env.EXPO_PUBLIC_MAP_ENABLED?.trim().toLowerCase()
+    : undefined;
+
+export const MAP_ENABLED =
+  mapFeature === "1" || mapFeature === "true";
+
 const movementTestIgn =
   typeof process !== "undefined"
     ? process.env.EXPO_PUBLIC_MOVEMENT_TEST_IGN?.trim()

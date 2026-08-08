@@ -59,6 +59,8 @@ class FakeMcSession extends EventEmitter {
   stopMovementForClient(clientId) {
     this.stoppedMovementClients.push(clientId);
   }
+
+  stopMapSubscriptionForClient() {}
 }
 
 function bridgeFixture() {

@@ -57,6 +57,11 @@ EXPO_PUBLIC_BRIDGE_URL="wss://bridge.proit.kr" npm run web:export
 
 GitHub Pages 자동 배포에서는 저장소 Settings → Secrets and variables → Actions → Variables에 `EXPO_PUBLIC_BRIDGE_URL=wss://bridge.proit.kr` 값을 추가한다. 실제 `BRIDGE_TOKEN`은 맥미니의 `/Users/podo/PROLL.github.io/bridge/.env` 안에만 두고, README/커밋/웹 번들에는 남기지 않는다.
 
+이동 패널의 로드된 청크 미니맵은 공개 변수 `EXPO_PUBLIC_MAP_ENABLED=true`와
+브릿지의 비공개 운영 설정 `MAP_ENABLED=true`를 함께 켰을 때만 구독한다.
+`MAP_MAX_SUBSCRIBERS` 기본값은 `2`이며 토큰이나 장기 자격 증명은 Expo 변수로
+전달하지 않는다.
+
 정적 export 후 `apps/mobile/scripts/prepare-web-dist.mjs`는 GitHub Pages 호환을 위해 `.nojekyll`을 만들고, Expo 번들을 루트 `app.js?v=<bundle-hash>`로 복사한다. 배포 후 오래된 홈 화면 앱이 갱신되지 않으면 Safari/Chrome에서 새로고침하거나 홈 화면 앱을 다시 추가한다.
 
 ## 맥에서 로컬 테스트 (iOS 시뮬레이터 + vanilla 서버)
