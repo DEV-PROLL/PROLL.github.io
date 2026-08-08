@@ -180,22 +180,20 @@ function PlayerSkinFace({
           },
         ]}
       />
-      {sourceAspectRatio === 1 ? (
-        <Image
-          source={{ uri: url }}
-          resizeMode="stretch"
-          accessibilityIgnoresInvertColors
-          style={[
-            pixelatedSkinStyle,
-            {
-              width: imageSize,
-              height: imageSize,
-              left: -size * 5,
-              top: -size,
-            },
-          ]}
-        />
-      ) : null}
+      <Image
+        source={{ uri: url }}
+        resizeMode="stretch"
+        accessibilityIgnoresInvertColors
+        style={[
+          pixelatedSkinStyle,
+          {
+            width: imageSize,
+            height: imageSize * sourceAspectRatio,
+            left: -size * 5,
+            top: -size,
+          },
+        ]}
+      />
     </View>
   );
 }
