@@ -29,6 +29,7 @@ import { headingFromMineflayerYaw } from "./position-direction";
 import { HEAD_DEBUG_ENABLED, HEAD_METADATA_ENABLED } from "./config";
 import { MapSubscriptionSession } from "./map-subscription-session";
 import { MineflayerMapSource } from "./mineflayer-map-source";
+import { patchMinecraftDataProtocol } from "./protocol-compat";
 
 type PlayerListMessage = Extract<ServerMessage, { type: "player_list" }>;
 type BossBarsMessage = Extract<ServerMessage, { type: "boss_bars" }>;
@@ -154,6 +155,7 @@ export class McSession extends EventEmitter {
 
   start(): void {
     if (this.bot) return;
+    patchMinecraftDataProtocol(this.opts.version);
     this.ended = false;
     this.lastInboundPacketAt = Date.now();
     console.info(
