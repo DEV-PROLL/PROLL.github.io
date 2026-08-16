@@ -25,6 +25,12 @@ function double(value) {
   return buffer;
 }
 
+function int16(value) {
+  const buffer = Buffer.alloc(2);
+  buffer.writeInt16BE(value);
+  return buffer;
+}
+
 function attribute(typeId, name, value, operation, slot, display) {
   return Buffer.concat([
     varint(typeId),
@@ -49,6 +55,22 @@ function equipmentPacketWithPerEntryDisplays() {
     varint(2), // modifier count
     attribute(2, "skript:sword_upgrade_damage", 1, 0, 0, 0),
     attribute(2, "minecraft:base_attack_damage", 6, 0, 1, 1),
+  ]);
+}
+
+function setSlotPacketWithZeroDamageTypeHolder() {
+  return Buffer.concat([
+    varint(0x14), // set_slot packet id in protocol 774
+    varint(1), // window id
+    varint(0), // state id
+    int16(0), // slot
+    varint(1), // item count
+    varint(1), // item id
+    varint(1), // added component count
+    varint(0), // removed component count
+    varint(8), // damage_type component
+    Buffer.from([1]), // EitherHolder: registry holder branch
+    varint(0), // valid registry id 0 (not inline NBT)
   ]);
 }
 
@@ -89,4 +111,47 @@ test("decodes 1.21.11 attribute displays from every equipment modifier", () => {
       display: { type: "hidden", component: undefined },
     },
   ]);
+});
+
+test("decodes 1.21.11 id-zero EitherHolder item components without reading NBT", () => {
+  patchMinecraftDataProtocol("1.21.11");
+
+  const deserializer = minecraftProtocol.createDeserializer({
+    state: minecraftProtocol.states.PLAY,
+    version: "1.21.11",
+  });
+  const parsed = deserializer.parsePacketBuffer(
+    setSlotPacketWithZeroDamageTypeHolder(),
+  );
+
+  assert.equal(parsed.data.name, "set_slot");
+  assert.deepEqual(parsed.data.params.item.components[0], {
+    type: "damage_type",
+    data: { hasHolder: true, damageType: 0 },
+  });
+});
+
+test("patches 1.21.11 variant components to EitherHolder wire shape", () => {
+  patchMinecraftDataProtocol("1.21.11");
+  const data = require("minecraft-data")("1.21.11");
+  const slotFields = data.protocol.types.SlotComponent[1];
+  const dataField = slotFields.find((field) => field.name === "data");
+  const componentTypes = dataField.type[1].fields;
+
+  for (const componentName of ["chicken/variant", "zombie_nautilus/variant"]) {
+    assert.equal(componentTypes[componentName][0], "container");
+    assert.deepEqual(componentTypes[componentName][1], [
+      { name: "hasHolder", type: "bool" },
+      {
+        name: "variant",
+        type: [
+          "switch",
+          {
+            compareTo: "hasHolder",
+            fields: { true: "varint", false: "string" },
+          },
+        ],
+      },
+    ]);
+  }
 });
